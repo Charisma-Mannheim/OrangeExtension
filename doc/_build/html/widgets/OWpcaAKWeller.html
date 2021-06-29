@@ -1,0 +1,175 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PCA &#8212; Chemometric Extensions 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="LDA" href="OWLDA.html" />
+    <link rel="prev" title="Test and score" href="OWtestandscoreAKWeller.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="OWLDA.html" title="LDA"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="OWtestandscoreAKWeller.html" title="Test and score"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Chemometric Extensions 0.0.1 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">PCA</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="pca">
+<h1>PCA<a class="headerlink" href="#pca" title="Permalink to this headline">¶</a></h1>
+<p>PCA linear transformation of input data.</p>
+<div class="section" id="inputs">
+<h2>Inputs<a class="headerlink" href="#inputs" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Data: imput dataset</p></li>
+<li><p>Test Data: imput dataset</p></li>
+</ul>
+<p>Please make sure to load only Data into the widget and add Test Data after PCA has finished processing Data! This widget fails when reloading a workflow. If you have this widget incorporated into a workflow
+ensure to clear the Input channels before reusing them.</p>
+</div>
+<div class="section" id="outputs">
+<h2>Outputs<a class="headerlink" href="#outputs" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Data: summary of input Data and pca transformed data.</p></li>
+<li><p>Scores: pca transformed data.</p></li>
+<li><p>Test Scores: pca transformed Test Data by pca model obtained from Data.</p></li>
+<li><p>Loadings: Eigenvectors.</p></li>
+<li><p>Explained variance: explained variance per principal component.</p></li>
+<li><p>Explained variance cumulative: summed explained variance per principal component</p></li>
+<li><p>Reconstruction error of cv row wise: sum of root mean squared error per used number of principal components for 10-fold cross validation.</p></li>
+<li><p>Reconstruction error of cv by Eigenvector: sum of root mean squared error per used number of principal components for 10-fold cross validation without overfit.</p></li>
+<li><p>Outlier: samples which have Q- or/and T?-values higher then the confidence level and therefore are considered outliers.</p></li>
+<li><p>Outlier corrected data: original data set without the outliers.</p></li>
+<li><p>PCA: pca model from Data</p></li>
+</ul>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation<a class="headerlink" href="#explanation" title="Permalink to this headline">¶</a></h2>
+<p>Principal Component Analysis (PCA) computes the PCA linear transformation of the input data and displays the scree
+plot of explained variances within the “Scree” tab, the
+root mean squared errors (rmse) of cross validation within the “Error” tab and the Q-T?-Plot within the “Q residuals vs. Hotellings T squared” tab.</p>
+<a class="reference internal image-reference" href="../_images/PCAexplVar.png"><img alt="Alternative text" src="../_images/PCAexplVar.png" style="width: 600px;" /></a>
+<ol class="arabic simple">
+<li><p>Select how many principal components you wish in your output. It is best to choose as few as possible with variance covered as high
+as possible. You can also set how much variance you wish to cover with your principal components.</p></li>
+<li><p>You can standardize data to adjust the values to common scale or just mean-center it.</p></li>
+<li><p>When Apply Automatically is ticked, the widget will automatically communicate all changes. Alternatively, click Apply.</p></li>
+<li><p>Produce a report.</p></li>
+<li><p>Principal components graph, where the red (lower) line is the variance covered per component and the green (upper) line is cumulative variance covered by components.</p></li>
+</ol>
+<a class="reference internal image-reference" href="../_images/PCArmsec.png"><img alt="Alternative text" src="../_images/PCArmsec.png" style="width: 600px;" /></a>
+<p>Principal components graph, where the red line is the rmsecv of cross validation row wise per component and the blue line is the rmsecv of cross validation by Eigenvector per component used.
+The number of components of the transformation can be selected either in the “Components Selection” input box or by dragging the vertical cutoff line in the graph.</p>
+<a class="reference internal image-reference" href="../_images/PCAQTplot.png"><img alt="Alternative text" src="../_images/PCAQTplot.png" style="width: 600px;" /></a>
+<p>To ensure that the PCA model is not skewed by outliers or to detect abnormal behavior in processes two metrics can be used for outlier detection purposes.
+The Q-residual and the T squared-metric. The underlying principle for using those metrics is that outliers are not as good described by the model as normal data points.
+They represent two kinds of errors; The Q-residuals represents the residuals that remain after a specific number of Components is used. Thus, they describe the left-over
+variations that are not explained by the PCA-Model. Since outliers are not as well described as other data points they will have larger Q-residuals.
+The T squared metric covers the variations within the model. Where low scores account for a better fit then high scores. The horizontal line represents the confidence level of the
+Q-Metric, the vertical line represents the confidence level of the T squared-metric.</p>
+</div>
+<div class="section" id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<p>PCA is often used for data reduction purposes when handling large datasets. Below, we used the Irisdataset to show how we can improve the visualization of the dataset with PCA.
+The transformed data in the Scatter Plot show a much clearer distinction between classes than the default settings.
+On the left the desired confidence level can be adjusted.</p>
+<a class="reference internal image-reference" href="../_images/PCAexample.png"><img alt="Alternative text" src="../_images/PCAexample.png" style="width: 800px;" /></a>
+<p>The widget provides several outputs: scores and loadings. Scores are weights for individual instances in the new
+coordinate system, while loadings are the system descriptors (weights for principal components). Loadings are useful to decide which original features could be important.
+Explained variance and cumulative explained variance are as well as rmse and rmsecv helpful tools to decide how many principal components are necessary to describe the original data sufficiently.</p>
+<p><em>Disclaimer: parts of this documentation page are taken from the documentation page of orange's original pca widget which served as template for this pca widget. For teaching purposes only!</em></p>
+</div>
+</div>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">PCA</a><ul>
+<li><a class="reference internal" href="#inputs">Inputs</a></li>
+<li><a class="reference internal" href="#outputs">Outputs</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
+</ul>
+
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="OWtestandscoreAKWeller.html"
+                        title="previous chapter">Test and score</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="OWLDA.html"
+                        title="next chapter">LDA</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/widgets/OWpcaAKWeller.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="OWLDA.html" title="LDA"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="OWtestandscoreAKWeller.html" title="Test and score"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Chemometric Extensions 0.0.1 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">PCA</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2020, Leslie Simon, Group of Prof. Dr. P. Weller, Institute of Instrumental Analysis, Hochschule Mannheim-University of applied sciences.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 3.2.1.
+    </div>
+  </body>
+</html>

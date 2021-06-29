@@ -1,0 +1,187 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test and score &#8212; Chemometric Extensions 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="PCA" href="OWpcaAKWeller.html" />
+    <link rel="prev" title="Welcome to chemometric extensions’s documentation!" href="../index.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="OWpcaAKWeller.html" title="PCA"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="../index.html" title="Welcome to chemometric extensions’s documentation!"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Chemometric Extensions 0.0.1 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Test and score</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="test-and-score">
+<h1>Test and score<a class="headerlink" href="#test-and-score" title="Permalink to this headline">¶</a></h1>
+<p>LDA linear transformation of input data.</p>
+<div class="section" id="inputs">
+<h2>Inputs<a class="headerlink" href="#inputs" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Data: input dataset</p></li>
+<li><p>Test Data: input dataset</p></li>
+<li><p>Learner: learning algorithm(s)</p></li>
+<li><p>Preprocessor</p></li>
+</ul>
+</div>
+<div class="section" id="outputs">
+<h2>Outputs<a class="headerlink" href="#outputs" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Predictions: predictions from learners</p></li>
+<li><p>Residuals: subtraction of actual values from learners predicted values</p></li>
+<li><p>Evaluation Results: results of testing classification algorithms</p></li>
+</ul>
+<p>The widget tests learning algorithms. Different sampling schemes are available, including using separate test data.
+The widget does two things. First, it shows a table with different classifier performance measures, such as classification
+accuracy and area under the curve. Second, it outputs evaluation results, which can be used by other widgets for
+analyzing the performance of classifiers, such as ROC Analysis or Confusion Matrix.</p>
+<p>The Learner signal has an uncommon property: it can be connected to more than one widget to test multiple
+learners with the same procedures.</p>
+<a class="reference internal image-reference" href="../_images/TestAndScore.png"><img alt="Alternative text" src="../_images/TestAndScore.png" style="width: 600px;" /></a>
+<ol class="arabic simple">
+<li><p>The widget supports various sampling methods.</p>
+<ul class="simple">
+<li><p>Cross-validation splits the data into a given number of folds (usually 5 or 10). The algorithm is tested by holding out examples from one fold at a time; the model is induced from other folds and examples from the held out fold are classified. This is repeated for all the folds.</p></li>
+<li><p>Cross validation by feature performs cross-validation but folds are defined by the selected categorical feature from meta-features.</p></li>
+<li><p>Random sampling randomly splits the data into the training and testing set in the given proportion (e.g. 70:30); the whole procedure is repeated for a specified number of times.</p></li>
+<li><p>Leave-one-out is similar, but it holds out one instance at a time, inducing the model from all others and then classifying the held out instances. This method is obviously very stable, reliable? and very slow.</p></li>
+<li><p>Test on train data uses the whole dataset for training and then for testing. This method practically always gives wrong results.</p></li>
+<li><p>Test on test data: the above methods use the data from Data signal only. To input another dataset with testing examples (for instance from another file or some data selected in another widget), we select Separate Test Data signal in the communication channel and select Test on test data.</p></li>
+</ul>
+</li>
+<li><p>For classification, Target class can be selected at the bottom of the widget. When Target class is (Average over classes), methods return scores that are weighted averages over all classes. For example, in case of the classifier with 3 classes, scores are computed for class 1 as a target class, class 2 as a target class, and class 3 as a target class. Those scores are averaged with weights based on the class size to retrieve the final score.</p></li>
+<li><p>The widget will compute a number of performance statistics. A few are shown by default. To see others, right-click on the header and select the desired statistic.</p></li>
+</ol>
+</div>
+<div class="section" id="classification">
+<h2>Classification<a class="headerlink" href="#classification" title="Permalink to this headline">¶</a></h2>
+<a class="reference internal image-reference" href="../_images/TestAndScoreCopy.png"><img alt="Alternative text" src="../_images/TestAndScoreCopy.png" style="width: 600px;" /></a>
+<ul class="simple">
+<li><p>Area under ROC is the area under the receiver-operating curve.</p></li>
+<li><p>Classification accuracy is the proportion of correctly classified examples.</p></li>
+<li><p>F-1 is a weighted harmonic mean of precision and recall (see below).</p></li>
+<li><p>Precision is the proportion of true positives among instances classified as positive, e.g. the proportion of Iris virginica correctly identified as Iris virginica.</p></li>
+<li><p>Recall is the proportion of true positives among all positive instances in the data, e.g. the number of sick among all diagnosed as sick.</p></li>
+<li><p>Specificity is the proportion of true negatives among all negative instances, e.g. the number of non-sick among all diagnosed as non-sick.</p></li>
+<li><p>LogLoss or cross-entropy loss takes into account the uncertainty of your prediction based on how much it varies from the actual label.</p></li>
+<li><p>Train time - cumulative time in seconds used for training models.</p></li>
+<li><p>Test time - cumulative time in seconds used for testing models.</p></li>
+</ul>
+</div>
+<div class="section" id="regression">
+<h2>Regression<a class="headerlink" href="#regression" title="Permalink to this headline">¶</a></h2>
+<a class="reference internal image-reference" href="../_images/TestAndScore.png"><img alt="Alternative text" src="../_images/TestAndScore.png" style="width: 600px;" /></a>
+<ul class="simple">
+<li><p>MSE measures the average of the squares of the errors or deviations (the difference between the estimator and what is estimated).</p></li>
+<li><p>RMSE is the square root of the arithmetic mean of the squares of a set of numbers (a measure of imperfection of the fit of the estimator to the data).</p></li>
+<li><p>SE is the standard deviation of the residuals called standard error.</p></li>
+<li><p>RE the relative error is the sum of all residuals related to the sum of all actual values in per cent.</p></li>
+<li><p>MAE is used to measure how close forecasts or predictions are to eventual outcomes.</p></li>
+<li><p>R2 is interpreted as the proportion of the variance in the dependent variable that is predictable from the independent variable.</p></li>
+<li><p>CVRMSE is RMSE normalized by the mean value of actual values.</p></li>
+<li><p>Train time - cumulative time in seconds used for training models.</p></li>
+<li><p>Test time - cumulative time in seconds used for testing models.</p></li>
+</ul>
+<ol class="arabic simple">
+<li><p>Choose the score for pairwise comparison of models and the region of practical equivalence (ROPE), in which differences are considered negligible.</p></li>
+<li><p>Pairwise comparison of models using the selected score (available only for cross-validation). The number in the table gives the probability that the model corresponding to the row is better than the model corresponding to the column. If negligible difference is enabled, the smaller number below shows the probability that the difference between the pair is negligible. The test is based on the Bayesian interpretation of the t-test (shorter introduction).</p></li>
+</ol>
+<p><em>Disclaimer: majority of this documentation page are taken from the documentation page of orange's original test and score widget which served as template for this pca widget. For teaching purposes only!</em></p>
+</div>
+</div>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Test and score</a><ul>
+<li><a class="reference internal" href="#inputs">Inputs</a></li>
+<li><a class="reference internal" href="#outputs">Outputs</a></li>
+<li><a class="reference internal" href="#classification">Classification</a></li>
+<li><a class="reference internal" href="#regression">Regression</a></li>
+</ul>
+</li>
+</ul>
+
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="../index.html"
+                        title="previous chapter">Welcome to chemometric extensions’s documentation!</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="OWpcaAKWeller.html"
+                        title="next chapter">PCA</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/widgets/OWtestandscoreAKWeller.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="OWpcaAKWeller.html" title="PCA"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="../index.html" title="Welcome to chemometric extensions’s documentation!"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Chemometric Extensions 0.0.1 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Test and score</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2020, Leslie Simon, Group of Prof. Dr. P. Weller, Institute of Instrumental Analysis, Hochschule Mannheim-University of applied sciences.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 3.2.1.
+    </div>
+  </body>
+</html>

@@ -1,0 +1,154 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LDA &#8212; Chemometric Extensions 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../_static/nature.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="PCA-LDA" href="OWPCALDA.html" />
+    <link rel="prev" title="PCA" href="OWpcaAKWeller.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="OWPCALDA.html" title="PCA-LDA"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="OWpcaAKWeller.html" title="PCA"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Chemometric Extensions 0.0.1 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">LDA</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="lda">
+<h1>LDA<a class="headerlink" href="#lda" title="Permalink to this headline">¶</a></h1>
+<p>LDA linear transformation of input data.</p>
+<div class="section" id="inputs">
+<h2>Inputs<a class="headerlink" href="#inputs" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Data: input dataset</p></li>
+<li><p>Test Data: input dataset</p></li>
+</ul>
+<p>Please make sure to load only Data into the widget and add Test Data after LDA has finished processing Data!If you have this widget incorporated into a workflow
+ensure to clear the Input channels before reusing them.</p>
+</div>
+<div class="section" id="outputs">
+<h2>Outputs<a class="headerlink" href="#outputs" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>LDA: lda model from Data.</p></li>
+</ul>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation<a class="headerlink" href="#explanation" title="Permalink to this headline">¶</a></h2>
+<p>Linear discriminant analysis (LDA) computes the LDA linear transformation of the input data and displays the scatter
+plot of the scores of the discriminant functions within the “Scatterplot” tab and the
+confusion matrix of the lda model's classification performance within the “Confusion matrix” tab.</p>
+<a class="reference internal image-reference" href="../_images/LDAscatter.png"><img alt="Alternative text" src="../_images/LDAscatter.png" style="width: 600px;" /></a>
+<ol class="arabic simple">
+<li><p>Select which discriminant functions (DF) has to be added to the graph.</p></li>
+<li><p>You can decide whether to color your data points by class or not and whether to see a legend or not.</p></li>
+<li><p>When Apply Automatically is ticked, the widget will automatically communicate all changes. Alternatively, click Apply.</p></li>
+</ol>
+<a class="reference internal image-reference" href="../_images/LDAconf.png"><img alt="Alternative text" src="../_images/LDAconf.png" style="width: 600px;" /></a>
+<p>Within the “Confusion matrix options” box are several evaluation modes for the confusion matrix calculation.</p>
+<ul class="simple">
+<li><p>if “Test on train data” is klicked, the confusion matrix regarding the prediction of the whole Data is calculated while
+Data serves to build the lda model.</p></li>
+<li><p>if “Test on test data” is klicked, Data serves to build the lda model and Test data's class membership will be predicted.
+By comparison of predictions with true class membership the confusion matrix is calculated.</p></li>
+<li><p>If “Cross validation” is klicked, Data gets devided into the specified number of folds. Every fold once is removed from Data
+while the remaining Data builds the lda model. The removed fold's class membership is predicted and by comparison the confusion matrix
+is calculated. After every fold gets predicted once, the mean of the confusion matrix is presented in the widget.</p></li>
+<li><p>If “Stratified cross validation” is klicked, the same calculations take place as if “Cross validation” is klicked but the algorithm
+ensures that every fold contains every class in equivalent numbers.</p></li>
+<li><p>If “Leave one out” is klicked, cross validation takes place but every fold contains only one element. Every element is predicted once.</p></li>
+</ul>
+</div>
+</div>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">LDA</a><ul>
+<li><a class="reference internal" href="#inputs">Inputs</a></li>
+<li><a class="reference internal" href="#outputs">Outputs</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+</ul>
+</li>
+</ul>
+
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="OWpcaAKWeller.html"
+                        title="previous chapter">PCA</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="OWPCALDA.html"
+                        title="next chapter">PCA-LDA</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/widgets/OWLDA.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="OWPCALDA.html" title="PCA-LDA"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="OWpcaAKWeller.html" title="PCA"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Chemometric Extensions 0.0.1 documentation</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">LDA</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2020, Leslie Simon, Group of Prof. Dr. P. Weller, Institute of Instrumental Analysis, Hochschule Mannheim-University of applied sciences.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 3.2.1.
+    </div>
+  </body>
+</html>
