@@ -4,7 +4,7 @@ from pyqtgraph import functions as fn
 from pyqtgraph import getConfigOption, LegendItem
 import numpy as np
 from pyqtgraph import PlotWidget, mkPen, InfiniteLine, PlotCurveItem, \
-    TextItem, Point
+    TextItem, Point, PlotItem, GraphicsWidget, GraphicsView
 from AnyQt.QtCore import Qt
 
 from pyqtgraph.widgets.ColorMapWidget import ColorMapParameter
@@ -122,7 +122,7 @@ class ScatterGraphWidget(QtGui.QSplitter):
     def plotClicked(self, plot, points):
         pass
 
-class ScatterGraph(ScatterGraphWidget):
+class ScatterGraph(ScatterGraphWidget, GraphicsWidget):
 
     def __init__(self, callback):
         super().__init__()

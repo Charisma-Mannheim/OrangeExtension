@@ -46,14 +46,14 @@ class OWPCA(widget.OWWidget):
         data = Output("Data", Table, default=True)
         transformed_data = Output("Scores", Table, replaces=["Scores"])
         transformed_testdata = Output("Scores test data", Table)
-        #components = Output("Loadings", Table)
+        components = Output("Loadings", Table)
         #explained_ratio = Output("Explained variance", Table)
         #CumSum = Output("Explained variance cumulative", Table)
         #rmseCV = Output("Reconstruction error of cross validation row-wise", Table)
         #RMSECV = Output("Reconstruction error of cross validation by Eigenvector", Table)
-        #outlier = Output("Outlier", Table)
-        #inlier = Output("Outlier corrected Dataset", Table)
-        #pca = Output("PCA", PCA, dynamic=False)
+        outlier = Output("Outlier", Table)
+        inlier = Output("Outlier corrected Dataset", Table)
+        pca = Output("PCA", PCA, dynamic=False)
 
 
     Clvl = [68.3, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 95.4, 99.7, 99.9]
@@ -124,7 +124,7 @@ class OWPCA(widget.OWWidget):
         self.components_spin = gui.spin(
             box, self, "ncomponents", 1, MAX_COMPONENTS,
             callback=self._update_selection_component_spin,
-            keyboardTracking=False
+            keyboardTracking=False, addToLayout=False
         )
         self.components_spin.setSpecialValueText("All")
 
@@ -481,10 +481,10 @@ class OWPCA(widget.OWWidget):
         self.Outputs.transformed_data.send(None)
         self.Outputs.transformed_testdata.send(None)
         self.Outputs.components.send(None)
-        self.Outputs.explained_ratio.send(None)
-        self.Outputs.CumSum.send(None)
-        self.Outputs.RMSE.send(None)
-        self.Outputs.RMSECV.send(None)
+        #self.Outputs.explained_ratio.send(None)
+        #self.Outputs.CumSum.send(None)
+        #self.Outputs.RMSE.send(None)
+        #self.Outputs.RMSECV.send(None)
         self.Outputs.rmseCV.send(None)
         self.Outputs.pca.send(self._pca_projector)
         self.Outputs.outlier.send(None)
@@ -912,14 +912,14 @@ class OWPCA(widget.OWWidget):
         self.Outputs.data.send(data)
         self.Outputs.transformed_data.send(transformed)
         self.Outputs.transformed_testdata.send(transformed_testdata)
-        #self.Outputs.components.send(components)
+        self.Outputs.components.send(components)
         #self.Outputs.explained_ratio.send(explVar)
         #self.Outputs.CumSum.send(CumSum)
         #self.Outputs.RMSECV.send(RMSECV)
         #self.Outputs.rmseCV.send(rmseCV)
-        #self.Outputs.pca.send(self._pca_projector)
-        #self.Outputs.outlier.send(outlier)
-        #self.Outputs.inlier.send(inlier)
+        self.Outputs.pca.send(self._pca_projector)
+        self.Outputs.outlier.send(outlier)
+        self.Outputs.inlier.send(inlier)
 
     def send_report(self):
 
@@ -927,6 +927,7 @@ class OWPCA(widget.OWWidget):
             return
         self.report_plot("Reconstruction Error", self.plot)
         self.report_plot("Explained Variance", self.plotTwo)
+        self.report_plot("T²/Q", self.plotThree)
 
     def setup_plot(self):
         super().setup_plot()
