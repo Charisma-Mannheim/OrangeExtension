@@ -47,10 +47,6 @@ class OWPCA(widget.OWWidget):
         transformed_data = Output("Scores", Table, replaces=["Scores"])
         transformed_testdata = Output("Scores test data", Table)
         components = Output("Loadings", Table)
-        #explained_ratio = Output("Explained variance", Table)
-        #CumSum = Output("Explained variance cumulative", Table)
-        #rmseCV = Output("Reconstruction error of cross validation row-wise", Table)
-        #RMSECV = Output("Reconstruction error of cross validation by Eigenvector", Table)
         outlier = Output("Outlier", Table)
         inlier = Output("Outlier corrected Dataset", Table)
         pca = Output("PCA", PCA, dynamic=False)
@@ -481,10 +477,7 @@ class OWPCA(widget.OWWidget):
         self.Outputs.transformed_data.send(None)
         self.Outputs.transformed_testdata.send(None)
         self.Outputs.components.send(None)
-        #self.Outputs.explained_ratio.send(None)
-        #self.Outputs.CumSum.send(None)
-        #self.Outputs.RMSE.send(None)
-        #self.Outputs.RMSECV.send(None)
+
         self.Outputs.rmseCV.send(None)
         self.Outputs.pca.send(self._pca_projector)
         self.Outputs.outlier.send(None)
@@ -554,15 +547,15 @@ class OWPCA(widget.OWWidget):
 
         if self.ncomponents == 0:
 
-            cut = len(self._RMSE)
+            cut = self._COMPONENTS
 
         else:
             cut = self.ncomponents
 
-        var = self._RMSECV[cut - 1]
+        val = self._RMSECV[cut - 1]
 
-        if numpy.isfinite(var):
-            self.RMSECV = int(var)
+        if numpy.isfinite(val):
+            self.RMSECV = int(val)
         self.ncomponents = cut
         self.plot.set_cut_point(cut)
         self.plotTwo.set_cut_point(cut)
@@ -573,6 +566,7 @@ class OWPCA(widget.OWWidget):
     def _update_selection_variance_spin(self):
 
         if self._pca is None:
+            self._invalidate_selection()
             return
         cut = numpy.searchsorted(self._cumulative,
                                  self.variance_covered / 100.0) + 1
@@ -745,7 +739,7 @@ class OWPCA(widget.OWWidget):
         if self._pca is None:
             return 0
         if self.ncomponents == 0:
-            max_comp = len(self._RMSECV)
+            max_comp = self._COMPONENTS
         else:
             max_comp = self.ncomponents
         RMSE_max = self._RMSECV[max_comp - 1]
