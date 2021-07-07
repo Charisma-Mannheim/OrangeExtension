@@ -22,6 +22,7 @@ from sklearn.decomposition import PCA as sklearnPCA
 from sklearn.model_selection import KFold
 import time
 from joblib import Parallel, delayed, parallel_backend
+import copy
 
 
 MAX_COMPONENTS = 100
@@ -32,7 +33,8 @@ LINE_NAMES_TWO = ["component variance", "cumulative variance"]
 class OWPCA(widget.OWWidget):
 
     name = "PCA"
-    description = "Principal component analysis with a diagram of the root mean square error of reconstruction and prediction as well as a scree plot of explained variance."
+    description = "Principal component analysis with a diagram of the root mean square error of reconstruction and prediction as well as \
+    a scree plot of explained variance."
     icon = "icons/PCA.svg"
     priority = 1
     keywords = ["principal component analysis", "linear transformation"]
@@ -99,9 +101,8 @@ class OWPCA(widget.OWWidget):
         self.train_datalabel = None
         self.classes = None
         self.outlier_metas = None
-            #numpy.empty((1,1))
         self.inlier_data = None
-        self.outlier_ids = None
+        self.outlier_data = None
 
         self.SYMBOLBRUSH = [(0, 204, 204, 180), (51, 255, 51, 180), (255, 51, 51, 180), (0, 128, 0, 180), (19, 234, 201, 180), \
                        (195, 46, 212, 180), (250, 194, 5, 180), (55, 55, 55, 180), (0, 114, 189, 180), (217, 83, 25, 180), (237, 177, 32, 180), \
@@ -193,7 +194,6 @@ class OWPCA(widget.OWWidget):
 
         tab = createTabPage(tabs, "Q residuals vs. Hotellings T²")
         tab.layout().addWidget(self.plotThree)
-        #self._update_standardize()
         self._update_centering()
 
     @Inputs.data
@@ -224,7 +224,6 @@ class OWPCA(widget.OWWidget):
         if data is not None:
 
             self._init_projector()
-
             self.data = data
 
             if hasattr(self.data.domain.class_var, 'values'):
@@ -362,42 +361,26 @@ class OWPCA(widget.OWWidget):
                 break
         Q_conf = Qsorted[i]
 
-
-
-
         data = self.data[:]
         outlier_index_Q = y > Q_conf
         outlier_index_T = x > Tsq_conf
         outlier_index = outlier_index_Q + outlier_index_T
         inlier_index = ~outlier_index
 
-        if data.metas.shape[1] == 0:
-            data.metas = numpy.array(['Sample {}'.format(i) for i in range(data.metas.shape[0])])
-            data.metas = data.metas.reshape(len(data.metas),1)
-            self.outlier_metas = data.metas[outlier_index]
-            self.outlier_ids = numpy.array([i for i in range(data.metas.shape[0])])[outlier_index]
-        else:
-            self.outlier_ids = numpy.array([i for i in range(data.X.shape[0])])[outlier_index]
-            outlier_index = outlier_index.reshape(len(outlier_index),1)
-            self.outlier_metas = numpy.array(data.metas[outlier_index])
-            self.outlier_metas = self.outlier_metas.reshape((len(self.outlier_metas), 1))
-           # self.outlier_ids = numpy.array([i for i in range(len(data.metas))])[outlier_index]
-
-
-            #ids = numpy.array([i for i in range(data.X.shape[0])])[outlier_index]
-            #outlier_index = outlier_index.reshape(len(outlier_index),1)
-            #outlier_metas = data.metas[outlier_index]
-            #outlier_metas = outlier_metas.reshape(len(outlier_metas),1)
-
-
-        inlier_data = data
+        inlier_data = copy.copy(data)
         inlier_data.X = data.X[inlier_index, :]
         inlier_data.W = data.W[inlier_index, :]
         inlier_data.Y = data.Y[inlier_index]
         inlier_data.ids = data.ids[inlier_index]
         inlier_data.metas = data.metas[inlier_index]
         self.inlier_data = inlier_data
-
+        outlier_data = copy.copy(data)
+        outlier_data.X = data.X[outlier_index, :]
+        outlier_data.W = data.W[outlier_index, :]
+        outlier_data.Y = data.Y[outlier_index]
+        outlier_data.ids = data.ids[outlier_index]
+        outlier_data.metas = data.metas[outlier_index]
+        self.outlier_data = outlier_data
 
 
         if self.classes is not None:
@@ -477,8 +460,6 @@ class OWPCA(widget.OWWidget):
         self.Outputs.transformed_data.send(None)
         self.Outputs.transformed_testdata.send(None)
         self.Outputs.components.send(None)
-
-        self.Outputs.rmseCV.send(None)
         self.Outputs.pca.send(self._pca_projector)
         self.Outputs.outlier.send(None)
         self.Outputs.inlier.send(None)
@@ -513,30 +494,22 @@ class OWPCA(widget.OWWidget):
 
     def _on_cut_changed(self, components):
 
-        if components == self.ncomponents \
-                or self.ncomponents == 0 \
-                or self._pca is not None \
-                and components == len(self._RMSECV):
+        if components == self.ncomponents:
             return
+        self._on_cut_changed_two(components)
         self.ncomponents = components
-        if self._pca is not None:
-            var = self._RMSECV[components - 1]
-            if numpy.isfinite(var):
-                self.RMSECV = int(var)
-        self._invalidate_selection()
 
     def _on_cut_changed_two(self, components):
 
-        if components == self.ncomponents \
-                or self.ncomponents == 0 \
-                or self._pca is not None \
-                and components == len(self._variance_ratio):
+        if components == self.ncomponents:
             return
         self.ncomponents = components
         if self._pca is not None:
             var = self._cumulative[components - 1]
             if numpy.isfinite(var):
                 self.variance_covered = int(var * 100)
+        self._update_selection_component_spin()
+        self._update_selection_variance_spin()
         self._invalidate_selection()
 
     def _update_selection_component_spin(self):
@@ -551,11 +524,9 @@ class OWPCA(widget.OWWidget):
 
         else:
             cut = self.ncomponents
-
-        val = self._RMSECV[cut - 1]
-
-        if numpy.isfinite(val):
-            self.RMSECV = int(val)
+        var = self._cumulative[cut - 1]
+        if numpy.isfinite(var):
+            self.variance_covered = int(var * 100)
         self.ncomponents = cut
         self.plot.set_cut_point(cut)
         self.plotTwo.set_cut_point(cut)
@@ -743,15 +714,8 @@ class OWPCA(widget.OWWidget):
         else:
             max_comp = self.ncomponents
         RMSE_max = self._RMSECV[max_comp - 1]
-        #if RMSE_max != numpy.floor(self.RMSECV):
         cut = max_comp
         assert numpy.isfinite(RMSE_max)
-        self.RMSECV = int(RMSE_max)
-        #else:
-            #self.ncomponents = cut = numpy.searchsorted(
-                #self._RMSECV, self.RMSECV) + 1
-
-
         return cut
 
     def _nselected_components_two(self):
@@ -782,7 +746,7 @@ class OWPCA(widget.OWWidget):
         axis.setTicks([[(i, str(i)) for i in range(1, p + 1, d)]])
 
     def commit(self):
-        inlier = outlier = RMSECV = rmseCV = transformed = transformed_testdata = data = components = CumSum = explVar = None
+        inlier = outlier  = transformed = transformed_testdata = data = components = None
         if self._pca is not None:
             if self._transformed is None:
                 self._transformed = self._pca(self.data)
@@ -819,11 +783,6 @@ class OWPCA(widget.OWWidget):
                 transformed_testdata = None
             proposed = [a.name for a in self._pca.orig_domain.attributes]
             meta_name = get_unique_names(proposed, 'components')
-            proposed2 = [b.name for b in self._pca.domain.attributes[:self.ncomponents]]
-            meta_name2 = get_unique_names(proposed2, 'variance')
-            proposed3 = [c.name for c in self._pca.domain.attributes[:self._COMPONENTS]]
-            meta_name3 = get_unique_names(proposed3, 'components')
-
             dom = Domain(
                 [ContinuousVariable(name, compute_value=lambda _: None)
                  for name in proposed],
@@ -832,54 +791,14 @@ class OWPCA(widget.OWWidget):
                                   for i in range(self.ncomponents)]],
                                 dtype=object).T
 
-            dom2 = Domain(
-                [ContinuousVariable(name, compute_value=lambda _: None)
-                 for name in proposed2],
-                metas=[StringVariable(name=meta_name2)])
-
-            dom3 = Domain(
-                [ContinuousVariable(name, compute_value=lambda _: None)
-                 for name in proposed3],
-                metas=[StringVariable(name=meta_name3)])
-
-            metas2 = numpy.array([['Cumulative Variance'
-                                  ]],
-                                dtype=object)
-            metas3 = numpy.array([['explained Variance'
-                                   ]],
-                                 dtype=object)
-
             metas4 = numpy.array([['id'
                                    ]],
                                  dtype=object)
-
-            metas5 = numpy.array([['RMSECV'
-                                   ]],
-                                 dtype=object)
-
-
-            if self.outlier_metas is not None:
-                proposed4 = [name for name in list(self.outlier_metas)]
-                meta_name4 = 'Samples'
-                dom8 = Domain(
-                    [ContinuousVariable(str(name), compute_value=lambda _: None)
-                    for name in proposed4],
-                    metas=[StringVariable(name=meta_name4)])
-                outlier = numpy.array(self.outlier_ids, ndmin = 2)
-                outlier = Table(dom8, outlier, metas=metas4)
-                outlier.name = 'Sample info'
 
             components = Table(dom, self._pca.components_[:self.ncomponents,:],
                                metas=metas)
             components.name = 'components'
 
-            CumSumVar = numpy.array(self._cumulative, ndmin = 2)
-            CumSum = Table(dom2, CumSumVar[:,:self.ncomponents], metas=metas2)
-            CumSum.name = 'CumSum'
-
-            explVar = numpy.array(self._variance_ratio, ndmin = 2)
-            explVar = Table(dom2, explVar[:,:self.ncomponents], metas=metas3)
-            explVar.name = 'explVar'
             data_dom = Domain(
                 self.data.domain.attributes,
                 self.data.domain.class_vars,
@@ -888,29 +807,14 @@ class OWPCA(widget.OWWidget):
                 data_dom, self.data.X, self.data.Y,
                 numpy.hstack((self.data.metas, transformed.X)),
                 ids=self.data.ids)
-            if self._RMSECV is not None:
-                RMSECV = self._RMSECV
-                self._RMSECV = RMSECV
-                RMSECV = numpy.transpose(RMSECV)
-                RMSECV = Table(dom3, RMSECV[:,:self._COMPONENTS], metas=metas5)
-                RMSECV.name = 'RMSECV by Eigenvector'
-            if self._rmseCV is not None:
-                rmseCV = self._rmseCV
-                self._rmseCV = rmseCV
-                rmseCV = numpy.transpose(rmseCV)
-                rmseCV = Table(dom3, rmseCV[:,:self._COMPONENTS], metas=metas5)
-                rmseCV.name = 'RMSECV row wise'
 
             inlier = self.inlier_data
+            outlier = self.outlier_data
         self._pca_projector.component = self.ncomponents
         self.Outputs.data.send(data)
         self.Outputs.transformed_data.send(transformed)
         self.Outputs.transformed_testdata.send(transformed_testdata)
         self.Outputs.components.send(components)
-        #self.Outputs.explained_ratio.send(explVar)
-        #self.Outputs.CumSum.send(CumSum)
-        #self.Outputs.RMSECV.send(RMSECV)
-        #self.Outputs.rmseCV.send(rmseCV)
         self.Outputs.pca.send(self._pca_projector)
         self.Outputs.outlier.send(outlier)
         self.Outputs.inlier.send(inlier)
