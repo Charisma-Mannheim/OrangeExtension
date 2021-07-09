@@ -20,10 +20,11 @@ class Normalize(object):
         self.std = None
         self.originalData = None
 
-    def __call__(self, data, mean, std):
-        self.mean = mean
-        self.std = std
+    def __call__(self, data):
+
         self.originalData = data
+        self.mean = np.mean(self.originalData,0)
+        self.std = np.std(self.originalData,0)
         normalizedData = (self.originalData - self.mean)/ self.std
         return normalizedData
 
@@ -33,9 +34,9 @@ class Center(object):
         self.mean = None
         self.originalData = None
 
-    def __call__(self, data, mean):
-        self.mean = mean
+    def __call__(self, data):
         self.originalData = data
+        self.mean = np.mean(self.originalData,0)
         centeredData = (self.originalData - self.mean)
         return centeredData
 

@@ -12,7 +12,7 @@ from Orange.widgets import widget, gui, settings
 from Orange.widgets.utils.slidergraph import SliderGraph
 from Orange.widgets.utils.widgetpreview import WidgetPreview
 from Orange.widgets.widget import Input, Output
-from orangecontrib.extension.utils.Transform import UnNormalize, UnCenter, Center, Normalize, DoNothing
+from orangecontrib.extension.utils.Transform import Normalize, DoNothing, Center
 from orangecontrib.extension.utils.LoggingDummyFile import PrinLog
 from orangecontrib.extension.utils import ControlChart
 from sklearn.metrics import mean_squared_error
@@ -276,26 +276,23 @@ class OWPCA(widget.OWWidget):
 
     def init_attr_values(self):
 
-        X = self.data
-        colMeans = numpy.mean(X.X,0)
-        colSD = numpy.std(X.X,0)
-        n = self.ncomponents
+        #X = self.data
+        #n = self.ncomponents
 
         if self.standardize == True and self.centering == False:
-            X_preprocessed = Normalize()(X.X, colMeans, colSD)
+            X_preprocessed = Normalize()(self.data.X)
             XArray = numpy.copy(X_preprocessed)
         elif self.centering == True and self.standardize == False:
-            X_preprocessed = X.X
+            X_preprocessed = self.data.X
             XArray = numpy.copy(X_preprocessed)
 
         else:
             return
 
-        pca = sklearnPCA(n_components=n, random_state=42, svd_solver='full')
+        pca = sklearnPCA(n_components=self.ncomponents, random_state=42, svd_solver='full')
         pca.fit(XArray)
-        Xtransformed = pca.transform(XArray)
-        T = Xtransformed
-        P = self._pca.components_[:n, :]
+        T = Xtransformed = pca.transform(XArray)
+        P = pca.components_[:self.ncomponents, :]
         X_pred = numpy.dot(T, P) + pca.mean_
 
         Err = XArray - X_pred
@@ -478,8 +475,6 @@ class OWPCA(widget.OWWidget):
         self.plot.update(
             numpy.arange(1, p+1), [RMSECV[:p,0], rmseCV[:p,0]],
             [Qt.blue, Qt.red], cutpoint_x=cutpos, names=LINE_NAMES)
-        b = [rmseCV, RMSECV]
-        #self.plot.setRange(yRange=(min(RMSECV[:p,0]), max(RMSECV[:p,0])))
         self.plot.setRange(yRange=(min(yi.min() for yi in [rmseCV, RMSECV]), max(yi.max() for yi in [rmseCV, RMSECV])))
         explained_ratio = self._variance_ratio
         explained = self._cumulative
@@ -556,38 +551,31 @@ class OWPCA(widget.OWWidget):
         return data
 
     def rmseCV(self, data, ncomponents, pb):
-        X = data
-        colMeans = numpy.mean(X.X,0)
-        colSD = numpy.std(X.X,0)
-        n = ncomponents
 
         if self.standardize == True and self.centering == False:
-            X_preprocessed = Normalize()(X.X, colMeans, colSD)
+            X_preprocessed = Normalize()(data.X)
             XArray = numpy.copy(X_preprocessed)
         elif self.centering == True and self.standardize == False:
-            X_preprocessed = Center()(X.X, colMeans)
+            X_preprocessed = Center()(data.X)
             XArray = numpy.copy(X_preprocessed)
 
         n_splits = 10
         Kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
         rmseCV_list_matrix = []
+        pca = sklearnPCA(random_state=42, svd_solver='full')
         for train_index, test_index in Kf.split(XArray):
             X_train, X_test = XArray[train_index], XArray[test_index]
-            pca = sklearnPCA(random_state=42, svd_solver='full')
             pca.fit(X_train)
             def innerfunctwo(index):
                 X_testtransformed = numpy.dot(X_test, pca.components_.T[:,:index])
                 X_test_pred = numpy.dot(X_testtransformed, pca.components_[:index,:])
-                #rmseCV = mean_squared_error(X_test, X_test_pred, squared=False)
                 rmseCV = numpy.sum((X_test - X_test_pred)**2)
                 return rmseCV
 
-            rmseCV_list = [innerfunctwo(index=index) for index in range(1,n+1,1)]
+            rmseCV_list = [innerfunctwo(index=index) for index in range(1,ncomponents+1,1)]
             rmseCVarray = numpy.array(rmseCV_list)
             rmseCV_list_matrix.append(rmseCVarray)
             pb[1].advance()
-
-        #pb.advance()
         rmseCVMatrix = numpy.array(rmseCV_list_matrix)
         rmseCV = numpy.sum(rmseCVMatrix,0)
         rmseCV = numpy.sqrt(rmseCV/(XArray.shape[0]*XArray.shape[1]))
@@ -597,9 +585,9 @@ class OWPCA(widget.OWWidget):
 
         KF = KFold(n_splits=n_splits, shuffle=True, random_state=42)
         i = 0
+        pcatwo = sklearnPCA(random_state=42, svd_solver='full')
         for train_index, test_index in KF.split(XArray):
             X_train, X_test = XArray[train_index], XArray[test_index]
-            pcatwo = sklearnPCA(random_state=42, svd_solver='full')
             pcatwo.fit(X_train)
             X_test_transposed = X_test.T
             if X_test_transposed.shape[0] >= 5:
@@ -617,8 +605,6 @@ class OWPCA(widget.OWWidget):
                     P_rest = P[rest_index]
                     X_test_rest = X_test_rest_transposed.T
                     t_reduced = numpy.dot(X_test_reduced, P_reduced)
-                    #t_reduced = numpy.dot(numpy.dot(X_test_reduced, P_reduced),
-                                          #numpy.linalg.inv(numpy.dot(P_reduced.T, P_reduced)))
                     X_test_rest_pred = numpy.dot(t_reduced, P_rest.T)
                     residual_list.append(X_test_rest-X_test_rest_pred)
                 c = 0
@@ -629,25 +615,16 @@ class OWPCA(widget.OWWidget):
                     else:
                         residuals = numpy.hstack((residuals, cols))
                 return residuals
-            ResidualsPerComp_list = [innerfunctwo(index=index) for index in range(1,n+1,1)]
+            ResidualsPerComp_list = [innerfunctwo(index=index) for index in range(1,ncomponents+1,1)]
             k = 0
             if i == 0:
-                RMSECV = numpy.empty((n, n_splits))
+                RMSECV = numpy.empty((ncomponents, n_splits))
                 for mat in ResidualsPerComp_list:
-                    #RMSECV[k,i] = (numpy.sum(mat ** 2) / (mat.shape[0] * mat.shape[1])) ** 0.5
                     RMSECV[k,i] = numpy.sum(mat ** 2)
                     k = k + 1
                 i = i + 1
             else:
-               # id = 0
-                #for mat, matneu in zip(ResidualsPerComp,ResidualsPerComp_list):
-                    #ResidualsPerComp[id] = mat + matneu
-                    #ResidualsPerComp[id] = numpy.vstack((mat, matneu))
-                    #id = id +1
-
-
                 for mat in ResidualsPerComp_list:
-                    #RMSECV[k,i] = (numpy.sum(mat ** 2) / (mat.shape[0] * mat.shape[1])) ** 0.5
                     RMSECV[k, i] = numpy.sum(mat ** 2)
                     k = k + 1
                 i = i + 1
