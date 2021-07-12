@@ -1,11 +1,20 @@
+from xml.sax.saxutils import escape
+import sys
+import scipy.sparse as sp
 import numbers
-import numpy
+import numpy as np
 from orangewidget.gui import tabWidget, createTabPage
+import pyqtgraph as pg
+from pyqtgraph.functions import mkPen
+from pyqtgraph.graphicsItems.ViewBox import ViewBox
+from AnyQt.QtCore import Qt, QSize, QLineF, pyqtSignal as Signal
+from AnyQt.QtGui import QPainter, QPen, QColor
+from AnyQt.QtWidgets import QApplication, QGraphicsLineItem
 from AnyQt.QtWidgets import QFormLayout
-from AnyQt.QtCore import Qt
-from Orange.data import Table, Domain, StringVariable, ContinuousVariable
+from Orange.data import Table, Domain, StringVariable, ContinuousVariable, DiscreteVariable
 from Orange.data.util import get_unique_names
 from Orange.data.sql.table import SqlTable, AUTO_DL_LIMIT
+from Orange.statistics.util import countnans, nanmean, nanmin, nanmax, nanstd
 from Orange.preprocess import preprocess
 from Orange.projection import PCA
 from Orange.widgets import widget, gui, settings
@@ -23,11 +32,230 @@ from sklearn.model_selection import KFold
 import time
 from joblib import Parallel, delayed, parallel_backend
 import copy
+from Orange.widgets.settings import (
+    Setting, ContextSetting, DomainContextHandler
+)
+from Orange.widgets.utils.annotated_data import (
+    create_annotated_table, ANNOTATED_DATA_SIGNAL_NAME
+)
+from Orange.widgets.utils.itemmodels import DomainModel
+from Orange.widgets.utils.plot import OWPlotGUI, SELECT, PANNING, ZOOMING
+from Orange.widgets.utils.sql import check_sql_input
+from Orange.widgets.utils.state_summary import format_summary_details
+from Orange.widgets.visualize.owdistributions import LegendItem
+from Orange.widgets.widget import OWWidget, Input, Output, Msg
 
 
+def ccw(a, b, c):
+    """
+    Checks whether three points are listed in a counterclockwise order.
+    """
+    ax, ay = (a[:, 0], a[:, 1]) if a.ndim == 2 else (a[0], a[1])
+    bx, by = (b[:, 0], b[:, 1]) if b.ndim == 2 else (b[0], b[1])
+    cx, cy = (c[:, 0], c[:, 1]) if c.ndim == 2 else (c[0], c[1])
+    return (cy - ay) * (bx - ax) > (by - ay) * (cx - ax)
+
+def intersects(a, b, c, d):
+    """
+    Checks whether line segment a (given points a and b) intersects with line
+    segment b (given points c and d).
+    """
+    return np.logical_and(ccw(a, c, d) != ccw(b, c, d),
+                          ccw(a, b, c) != ccw(a, b, d))
+
+def line_intersects_profiles(p1, p2, table):
+    """
+    Checks if a line intersects any line segments.
+
+    Parameters
+    ----------
+    p1, p2 : ndarray
+        Endpoints of the line, given x coordinate as p_[0]
+        and y coordinate as p_[1].
+    table : ndarray
+        An array of shape m x n x p; where m is number of connected points
+        for a individual profile (i. e. number of features), n is number
+        of instances, p is number of coordinates (x and y).
+
+    Returns
+    -------
+    result : ndarray
+        Array of bools with shape of number of instances in the table.
+    """
+    res = np.zeros(len(table[0]), dtype=bool)
+    for i in range(len(table) - 1):
+        res = np.logical_or(res, intersects(p1, p2, table[i], table[i + 1]))
+    return res
+
+class LinePlotStyle:
+    DEFAULT_COLOR = QColor(Qt.blue)
+
+    UNSELECTED_LINE_ALPHA = 170
+
+class LinePlotAxisItem(pg.AxisItem):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._ticks = {}
+
+    def set_ticks(self, ticks):
+        if ticks:
+            self._ticks = dict(enumerate(ticks, 1))
+        else:
+            return
+
+    def tickStrings(self, values, scale, spacing):
+        return [self._ticks.get(v * scale, "") for v in values]
+
+class LinePlotViewBox(ViewBox):
+    selection_changed = Signal(np.ndarray)
+
+    def __init__(self):
+        super().__init__(enableMenu=False)
+        self._profile_items = None
+        self._can_select = True
+        self._graph_state = SELECT
+
+        self.setMouseMode(self.PanMode)
+
+    def set_graph_state(self, state):
+        self._graph_state = state
+
+    def get_selected(self, p1, p2):
+        if self._profile_items is None:
+            return np.array(False)
+        return line_intersects_profiles(np.array([p1.x(), p1.y()]),
+                                        np.array([p2.x(), p2.y()]),
+                                        self._profile_items)
+    def add_profiles(self, y):
+        if sp.issparse(y):
+            y = y.todense()
+        self._profile_items = np.array(
+            [np.vstack((np.full((1, y.shape[0]), i + 1), y[:, i].flatten())).T
+             for i in range(y.shape[1])])
+
+    def remove_profiles(self):
+        self._profile_items = None
+
+    def mouseClickEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self.autoRange()
+            self.enableAutoRange()
+        else:
+            event.accept()
+            self.selection_changed.emit(np.array(False))
+
+    def reset(self):
+        self._profile_items = None
+        self._can_select = True
+        self._graph_state = SELECT
+
+class LinePlotGraph(pg.PlotWidget):
+    def __init__(self, parent, y_axis_label):
+        self.bottom_axis = LinePlotAxisItem(orientation="bottom", maxTickLength=-5)
+        super().__init__(parent, viewBox=LinePlotViewBox(),
+                         background="w", enableMenu=False,
+                         axisItems={"bottom": self.bottom_axis})
+        self.left_axis = self.getAxis("left")
+        self.left_axis.setLabel(y_axis_label)
+        self.view_box = self.getViewBox()
+        self.selection = set()
+        self.getPlotItem().buttonsHidden = True
+        self.setRenderHint(QPainter.Antialiasing, True)
+        self.bottom_axis.labelText = "Features"
+        self.bottom_axis.setLabel(axis=self.bottom_axis, text=self.bottom_axis.labelText or "")
+
+    def select(self, indices):
+        keys = QApplication.keyboardModifiers()
+        indices = set(indices)
+        if keys & Qt.ControlModifier:
+            self.selection ^= indices
+        elif keys & Qt.AltModifier:
+            self.selection -= indices
+        elif keys & Qt.ShiftModifier:
+            self.selection |= indices
+        else:
+            self.selection = indices
+
+    def reset(self):
+        self.selection = set()
+        self.view_box.reset()
+        self.clear()
+        self.getAxis('bottom').set_ticks(None)
+
+class Profilespin_sel:
+    def __init__(self, data, indices, color, graph):
+        self.x_data = np.arange(1, data.X.shape[1] + 1)
+        self.y_data = data.X
+        self.indices = indices
+        self.ids = data.ids
+        self.color = color
+        self.graph = graph
+        self.graph_items = []
+        self.__mean = nanmean(self.y_data, axis=0)
+        self.__create_curves()
+
+    def __create_curves(self):
+        self.profiles = self._get_profiles_curve()
+        self.graph_items = [
+            self.profiles,
+        ]
+
+    def _get_profiles_curve(self):
+
+
+        x, y, con = self.__get_disconnected_curve_data(self.y_data)
+        color = QColor(self.color)
+        color.setAlpha(LinePlotStyle.UNSELECTED_LINE_ALPHA)
+        pen = self.make_pen(color)
+        return pg.PlotCurveItem(x=x, y=y, connect=con, pen=pen, antialias=True)
+
+
+    def remove_items(self):
+        for item in self.graph_items:
+            self.graph.removeItem(item)
+        self.graph_items = []
+
+    def set_visible_profiles(self, show_profiles=True, **_):
+        if  show_profiles:
+
+            self.graph.addItem(self.profiles)
+
+        self.profiles.setVisible(show_profiles)
+
+
+    def update_profiles_color(self, selection):
+        color = QColor(self.color)
+        alpha = LinePlotStyle.UNSELECTED_LINE_ALPHA
+        color.setAlpha(alpha)
+        x, y = self.profiles.getData()
+        self.profiles.setData(x=x, y=y, pen=self.make_pen(color))
+
+
+    @staticmethod
+    def __get_disconnected_curve_data(y_data):
+        m, n = y_data.shape
+        x = np.arange(m * n) % n + 1
+        y = y_data.A.flatten() if sp.issparse(y_data) else y_data.flatten()
+        connect = np.ones_like(y, bool)
+        connect[n - 1:: n] = False
+        return x, y, connect
+
+    @staticmethod
+    def make_pen(color, width=3):
+        pen = QPen(color, width)
+        pen.setCosmetic(True)
+        return pen
+
+MAX_FEATURES = 10000
 MAX_COMPONENTS = 100
 LINE_NAMES = ["RMSECV by Eigen", "RMSECV row-wise"]
 LINE_NAMES_TWO = ["component variance", "cumulative variance"]
+
+
+
+
+
+
 
 
 class OWPCA(widget.OWWidget):
@@ -67,6 +295,8 @@ class OWPCA(widget.OWWidget):
     class_box = settings.Setting(True)
     legend_box = settings.Setting(False)
     confidence = settings.Setting(6)
+    Principal_Component = Setting(1)
+    show_profiles = Setting(True)
 
     graph_name = "plot.plotItem"
 
@@ -74,11 +304,19 @@ class OWPCA(widget.OWWidget):
         trivial_components = widget.Msg(
             "All components of the PCA are trivial (explain 0 variance). "
             "Input data is constant (or near constant).")
+        no_display_option = Msg("No display option is selected.")
 
     class Error(widget.OWWidget.Error):
         no_features = widget.Msg("At least 1 feature is required")
         no_instances = widget.Msg("At least 1 data instance is required")
         no_traindata = widget.Msg("No train data submitted")
+        not_enough_attrs = Msg("Need at least one continuous feature.")
+        no_valid_loadings = Msg("No plot due to no valid data.")
+        loading_not_available = Msg("Requested loadings not available.")
+    class Information(OWWidget.Information):
+        hidden_instances = Msg("Instances with unknown values are not shown.")
+        too_many_features = Msg("Data has too many features. Only first {}"
+                                " are shown.".format(MAX_FEATURES))
 
     def __init__(self):
 
@@ -103,6 +341,10 @@ class OWPCA(widget.OWWidget):
         self.outlier_metas = None
         self.inlier_data = None
         self.outlier_data = None
+        self.components = None
+        self.graph_variables = []
+        self.__spin_selection = []
+        self.loadings = None
 
         self.SYMBOLBRUSH = [(0, 204, 204, 180), (51, 255, 51, 180), (255, 51, 51, 180), (0, 128, 0, 180), (19, 234, 201, 180), \
                        (195, 46, 212, 180), (250, 194, 5, 180), (55, 55, 55, 180), (0, 114, 189, 180), (217, 83, 25, 180), (237, 177, 32, 180), \
@@ -120,7 +362,7 @@ class OWPCA(widget.OWWidget):
 
         self.components_spin = gui.spin(
             box, self, "ncomponents", 1, MAX_COMPONENTS,
-            callback=self._update_selection_component_spin,
+            callback=self._update_selection_components_spin,
             keyboardTracking=False, addToLayout=False
         )
         self.components_spin.setSpecialValueText("All")
@@ -168,6 +410,21 @@ class OWPCA(widget.OWWidget):
             items=[str(x) for x in self.Clvl],
             orientation=Qt.Horizontal, callback=self._param_changed)
 
+        lbox = gui.vBox(self.controlArea, "Display Loadings for")
+        lform = QFormLayout()
+        lbox.layout().addLayout(lform)
+
+
+        self.component_spin = gui.spin(
+            lbox, self, "Principal_Component", 1, MAX_FEATURES,
+            callback=self._update_selection_component_spin,
+            keyboardTracking=False
+        )
+        lform.addRow("Component:", self.component_spin)
+
+
+
+
 
         self.controlArea.layout().addStretch()
         gui.auto_apply(self.controlArea, self, "auto_commit")
@@ -181,6 +438,8 @@ class OWPCA(widget.OWWidget):
             self._on_cut_changed_two)
 
         self.plotThree = ControlChart.ScatterGraph(callback=None)
+        self.loadingsplot = LinePlotGraph(self, y_axis_label="Loadings")
+
 
         tabs = tabWidget(self.mainArea)
 
@@ -188,14 +447,18 @@ class OWPCA(widget.OWWidget):
         tab = createTabPage(tabs, "Error")
         tab.layout().addWidget(self.plot)
 
-        # table tab
+        # graph 2 tab
         tab = createTabPage(tabs, "Scree")
         tab.layout().addWidget(self.plotTwo)
 
         tab = createTabPage(tabs, "Q residuals vs. Hotellings T²")
         tab.layout().addWidget(self.plotThree)
-        self._update_centering()
 
+        tab = createTabPage(tabs, "Loadings plot")
+        tab.layout().addWidget(self.loadingsplot)
+
+        self._update_centering()
+##Process input data
     @Inputs.data
     def set_data(self, data):
 
@@ -227,9 +490,9 @@ class OWPCA(widget.OWWidget):
             self.data = data
 
             if hasattr(self.data.domain.class_var, 'values'):
-                self.classes = numpy.arange(0, len(self.data.domain.class_var.values))
+                self.classes = np.arange(0, len(self.data.domain.class_var.values))
                 self.train_classes = {int(self.classes[i]): self.data.domain.class_var.values[i] for i in
-                                      numpy.arange(0, len(self.data.domain.class_var.values))}
+                                      np.arange(0, len(self.data.domain.class_var.values))}
             else:
                 self.classes = None
             self.train_datalabel = self.data.Y
@@ -274,6 +537,423 @@ class OWPCA(widget.OWWidget):
         transformed = Projector(X)
         return transformed
 
+    def fit(self):
+        self.clear()
+        self.Warning.trivial_components.clear()
+        if self.data is None:
+            return
+        data = self.data
+        if self.standardize:
+            self._pca_projector.preprocessors = \
+                self._pca_preprocessors + [preprocess.Normalize(center=True)]
+        else:
+            self._pca_projector.preprocessors = self._pca_preprocessors
+        if not isinstance(data, SqlTable):
+            Data = data[:]
+            pca = self._pca_projector(data)
+            variance_ratio = pca.explained_variance_ratio_
+            cumulative = np.cumsum(variance_ratio)
+            if len(pca.components_) >= 30:
+                COMPONENTS = 30
+            else:
+                COMPONENTS = pca.components_.shape[1]
+            pb = gui.ProgressBar(self, 10)
+            pbtwo = gui.ProgressBar(self, 10)
+            rmseCV, RMSECV = self.rmseCV(Data, COMPONENTS, pb=[pb,pbtwo])
+            pb.finish()
+            pbtwo.finish()
+            if np.isfinite(cumulative[-1]):
+                self.components_spin.setRange(0, len(cumulative))
+                self._pca = pca
+                self._variance_ratio = variance_ratio
+                self._cumulative = cumulative
+                self._RMSECV = RMSECV
+                self._rmseCV = rmseCV
+                self._COMPONENTS = COMPONENTS
+                self._setup_plot()
+
+            else:
+                self.Warning.trivial_components()
+            self.unconditional_commit()
+            if self._pca is not None:
+                self.loadings = self.components
+                self.check_loadings()
+                self.setup_loadingsplot()
+
+    def preprocess(data, preprocessors):
+
+        for pp in preprocessors:
+            data = pp(data)
+        return data
+
+    def rmseCV(self, data, ncomponents, pb):
+
+        if self.standardize == True and self.centering == False:
+            X_preprocessed = Normalize()(data.X)
+            XArray = np.copy(X_preprocessed)
+        elif self.centering == True and self.standardize == False:
+            X_preprocessed = Center()(data.X)
+            XArray = np.copy(X_preprocessed)
+
+        n_splits = 10
+        Kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        rmseCV_list_matrix = []
+        pca = sklearnPCA(random_state=42, svd_solver='full')
+        for train_index, test_index in Kf.split(XArray):
+            X_train, X_test = XArray[train_index], XArray[test_index]
+            pca.fit(X_train)
+            def innerfunctwo(index):
+                X_testtransformed = np.dot(X_test, pca.components_.T[:,:index])
+                X_test_pred = np.dot(X_testtransformed, pca.components_[:index,:])
+                rmseCV = np.sum((X_test - X_test_pred)**2)
+                return rmseCV
+
+            rmseCV_list = [innerfunctwo(index=index) for index in range(1,ncomponents+1,1)]
+            rmseCVarray = np.array(rmseCV_list)
+            rmseCV_list_matrix.append(rmseCVarray)
+            pb[1].advance()
+        rmseCVMatrix = np.array(rmseCV_list_matrix)
+        rmseCV = np.sum(rmseCVMatrix,0)
+        rmseCV = np.sqrt(rmseCV/(XArray.shape[0]*XArray.shape[1]))
+        rmseCV = rmseCV/rmseCV.max()
+        rmseCVrowwise = rmseCV.reshape((len(rmseCV), 1))
+
+
+        KF = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        i = 0
+        pcatwo = sklearnPCA(random_state=42, svd_solver='full')
+        for train_index, test_index in KF.split(XArray):
+            X_train, X_test = XArray[train_index], XArray[test_index]
+            pcatwo.fit(X_train)
+            X_test_transposed = X_test.T
+            if X_test_transposed.shape[0] >= 5:
+                numberOfFolds = 5
+            else:
+                numberOfFolds = X_test_transposed.shape[0]
+            def innerfunctwo(index):
+                P = pcatwo.components_.T[:, :index]
+                kf = KFold(n_splits=numberOfFolds, shuffle=True, random_state=42)
+                residual_list = []
+                for reduced_index, rest_index in kf.split(X_test_transposed):
+                    X_test_reduced_transposed, X_test_rest_transposed = X_test_transposed[reduced_index], X_test_transposed[rest_index]
+                    X_test_reduced = X_test_reduced_transposed.T
+                    P_reduced = P[reduced_index]
+                    P_rest = P[rest_index]
+                    X_test_rest = X_test_rest_transposed.T
+                    t_reduced = np.dot(X_test_reduced, P_reduced)
+                    X_test_rest_pred = np.dot(t_reduced, P_rest.T)
+                    residual_list.append(X_test_rest-X_test_rest_pred)
+                c = 0
+                for cols in residual_list:
+                    if c == 0:
+                        residuals = cols
+                        c = c + 1
+                    else:
+                        residuals = np.hstack((residuals, cols))
+                return residuals
+            ResidualsPerComp_list = [innerfunctwo(index=index) for index in range(1,ncomponents+1,1)]
+            k = 0
+            if i == 0:
+                RMSECV = np.empty((ncomponents, n_splits))
+                for mat in ResidualsPerComp_list:
+                    RMSECV[k,i] = np.sum(mat ** 2)
+                    k = k + 1
+                i = i + 1
+            else:
+                for mat in ResidualsPerComp_list:
+                    RMSECV[k, i] = np.sum(mat ** 2)
+                    k = k + 1
+                i = i + 1
+            pb[0].advance()
+        RMSECV = np.sum(RMSECV, axis=1)
+        RMSECV = np.sqrt(RMSECV/(XArray.shape[0]*XArray.shape[1]))
+        RMSECV = RMSECV/RMSECV.max()
+        rmseCVbyEigen = RMSECV.reshape((len(RMSECV),1))
+        return rmseCVrowwise, rmseCVbyEigen
+
+    def setProgressValue(self, value):
+
+        self.progressBarSet(value)
+
+    def _init_projector(self):
+
+        self._pca_projector = PCA(n_components=MAX_COMPONENTS, random_state=0)
+        self._pca_projector.component = self.ncomponents
+        self._pca_preprocessors = PCA.preprocessors
+
+##Widget properties
+
+    def commit(self):
+        inlier = outlier  = transformed = transformed_testdata = data = components = None
+        if self._pca is not None:
+            if self._transformed is None:
+                self._transformed = self._pca(self.data)
+
+            transformed = self._transformed
+            explVar = np.array(self._variance_ratio, ndmin=2)
+            explVarFlo = [k for k in explVar]
+            a = [str(i)  for i in transformed.domain.attributes[:self.ncomponents]]
+            b = [" (" + str(np.around(i*100, decimals=2)) + "%) " for i in explVarFlo[0][:self.ncomponents]]
+            Domainfinal = [a[i] + b[i] for i in range(self.ncomponents)]
+            domainFinal = Domain(
+                [ContinuousVariable(name, compute_value=lambda _: None)
+                              for name in Domainfinal],
+                self.data.domain.class_vars,
+                self.data.domain.metas
+            )
+            domain = Domain(
+                transformed.domain.attributes[:self.ncomponents],
+                self.data.domain.class_vars,
+                self.data.domain.metas
+            )
+            transformed = transformed.from_table(domain, transformed)
+            transformed.domain = domainFinal
+            if self._testdata_transformed is not None:
+                transformed_testdata = self._testdata_transformed
+                domainzwo = Domain(
+                    transformed_testdata.domain.attributes[:self.ncomponents],
+                    self.data.domain.class_vars,
+                    self.data.domain.metas
+                )
+                transformed_testdata = transformed_testdata.from_table(domainzwo, transformed_testdata)
+                transformed_testdata.domain = domainFinal
+            else:
+                transformed_testdata = None
+            proposed = [a.name for a in self._pca.orig_domain.attributes]
+            meta_name = get_unique_names(proposed, 'components')
+            dom = Domain(
+                [ContinuousVariable(name, compute_value=lambda _: None)
+                 for name in proposed],
+                metas=[StringVariable(name=meta_name)])
+            metas = np.array([['PC{}'.format(i + 1)
+                                  for i in range(self.ncomponents)]],
+                                dtype=object).T
+
+            metas4 = np.array([['id'
+                                   ]],
+                                 dtype=object)
+
+            components = Table(dom, self._pca.components_[:self.ncomponents,:],
+                               metas=metas)
+            components.name = 'components'
+
+            data_dom = Domain(
+                self.data.domain.attributes,
+                self.data.domain.class_vars,
+                self.data.domain.metas + domain.attributes)
+            data = Table.from_numpy(
+                data_dom, self.data.X, self.data.Y,
+                np.hstack((self.data.metas, transformed.X)),
+                ids=self.data.ids)
+
+            inlier = self.inlier_data
+            outlier = self.outlier_data
+        self._pca_projector.component = self.ncomponents
+        self.Outputs.data.send(data)
+        self.Outputs.transformed_data.send(transformed)
+        self.Outputs.transformed_testdata.send(transformed_testdata)
+        self.Outputs.components.send(components)
+        self.Outputs.pca.send(self._pca_projector)
+        self.Outputs.outlier.send(outlier)
+        self.Outputs.inlier.send(inlier)
+        self.components = components
+
+    def clear(self):
+
+        self._pca = None
+        self._transformed = None
+        self._variance_ratio = None
+        self._cumulative = None
+        self.plot.clear_plot()
+        self.plotTwo.clear_plot()
+        self.plotThree.clear_plot()
+        self._RMSECV = None
+        self._rmseCV = None
+
+    def clear_outputs(self):
+        self.Outputs.data.send(None)
+        self.Outputs.transformed_data.send(None)
+        self.Outputs.transformed_testdata.send(None)
+        self.Outputs.components.send(None)
+        self.Outputs.pca.send(self._pca_projector)
+        self.Outputs.outlier.send(None)
+        self.Outputs.inlier.send(None)
+
+    def _invalidate_selection(self):
+        self.commit()
+
+    def send_report(self):
+
+        if self.data is None:
+            return
+        self.report_plot("Reconstruction Error", self.plot)
+        self.report_plot("Explained Variance", self.plotTwo)
+        self.report_plot("T²/Q", self.plotThree)
+
+    @classmethod
+    def migrate_settings(cls, settings, version):
+        if "variance_covered" in settings:
+            # Due to the error in gh-1896 the variance_covered was persisted
+            # as a NaN value, causing a TypeError in the widgets `__init__`.
+            vc = settings["variance_covered"]
+            if isinstance(vc, numbers.Real):
+                if np.isfinite(vc):
+                    vc = int(vc)
+                else:
+                    vc = 100
+                settings["variance_covered"] = vc
+        if settings.get("ncomponents", 0) > MAX_COMPONENTS:
+            settings["ncomponents"] = MAX_COMPONENTS
+
+        # Remove old `decomposition_idx` when SVD was still included
+        settings.pop("decomposition_idx", None)
+
+        # Remove RemotePCA settings
+        settings.pop("batch_size", None)
+        settings.pop("address", None)
+        settings.pop("auto_update", None)
+##Plot one and two
+    def _setup_plot(self):
+        if self._pca is None:
+            self.plot.clear_plot()
+            self.plot_two.clear_plot()
+            return
+
+        RMSECV = self._RMSECV
+        rmseCV = self._rmseCV
+        cutpos = self._nselected_components()
+        p = min(len(self._RMSECV), self.maxp)
+
+        self.plot.update(
+            np.arange(1, p+1), [RMSECV[:p,0], rmseCV[:p,0]],
+            [Qt.blue, Qt.red], cutpoint_x=cutpos, names=LINE_NAMES)
+        self.plot.setRange(yRange=(min(yi.min() for yi in [rmseCV, RMSECV]), max(yi.max() for yi in [rmseCV, RMSECV])))
+        explained_ratio = self._variance_ratio
+        explained = self._cumulative
+        cutposTwo = self._nselected_components_two()
+        pTwo = min(len(self._variance_ratio), self.maxp)
+
+        self.plotTwo.update(
+            np.arange(1, p+1), [explained_ratio[:pTwo], explained[:pTwo]],
+            [Qt.red, Qt.darkYellow], cutpoint_x=cutposTwo, names=LINE_NAMES_TWO)
+
+        self._update_axis()
+
+    def _on_cut_changed(self, components):
+
+        if components == self.ncomponents:
+            return
+        self._on_cut_changed_two(components)
+        self.ncomponents = components
+        if self._pca is not None:
+            self.loadings = self.components
+            self.check_loadings()
+            self.setup_loadingsplot()
+
+    def _on_cut_changed_two(self, components):
+
+        if components == self.ncomponents:
+            return
+        self.ncomponents = components
+        if self._pca is not None:
+            var = self._cumulative[components - 1]
+            if np.isfinite(var):
+                self.variance_covered = int(var * 100)
+        self._update_selection_components_spin()
+        self._update_selection_variance_spin()
+        self._invalidate_selection()
+        if self._pca is not None:
+            self.loadings = self.components
+            self.check_loadings()
+            self.setup_loadingsplot()
+
+    def _update_selection_components_spin(self):
+
+        if self._pca is None:
+            self._invalidate_selection()
+            return
+
+        if self.ncomponents == 0:
+
+            cut = self._COMPONENTS
+
+        else:
+            cut = self.ncomponents
+        var = self._cumulative[cut - 1]
+        if np.isfinite(var):
+            self.variance_covered = int(var * 100)
+        self.ncomponents = cut
+        self.plot.set_cut_point(cut)
+        self.plotTwo.set_cut_point(cut)
+        self.init_attr_values()
+        self._setup_plotThree(self.attr_x, self.attr_y)
+        self._invalidate_selection()
+        if self._pca is not None:
+            self.loadings = self.components
+            self.check_loadings()
+            self.setup_loadingsplot()
+
+    def _update_selection_variance_spin(self):
+
+        if self._pca is None:
+            self._invalidate_selection()
+            return
+        cut = np.searchsorted(self._cumulative,
+                                 self.variance_covered / 100.0) + 1
+        cut = min(cut, len(self._cumulative))
+        self.ncomponents = cut
+        self.plot.set_cut_point(cut)
+        self.plotTwo.set_cut_point(cut)
+        self.init_attr_values()
+        self._setup_plotThree(self.attr_x, self.attr_y)
+        self._invalidate_selection()
+        if self._pca is not None:
+            self.loadings = self.components
+            self.check_loadings()
+            self.setup_loadingsplot()
+
+    def _nselected_components(self):
+
+        """Return the number of selected components."""
+        if self._pca is None:
+            return 0
+        if self.ncomponents == 0:
+            max_comp = self._COMPONENTS
+        else:
+            max_comp = self.ncomponents
+        RMSE_max = self._RMSECV[max_comp - 1]
+        cut = max_comp
+        assert np.isfinite(RMSE_max)
+        return cut
+
+    def _nselected_components_two(self):
+        """Return the number of selected components."""
+        if self._pca is None:
+            return 0
+        if self.ncomponents == 0:
+            max_comp = len(self._variance_ratio)
+        else:
+            max_comp = self.ncomponents
+        var_max = self._cumulative[max_comp - 1]
+        if var_max != np.floor(self.variance_covered / 100.0):
+            cut = max_comp
+            assert np.isfinite(var_max)
+            self.variance_covered = int(var_max * 100)
+        else:
+            self.ncomponents = cut = np.searchsorted(
+                self._cumulative, self.variance_covered / 100.0) + 1
+        return cut
+
+    def _update_axis(self):
+        p = min(len(self._RMSECV), self.maxp)
+        axis = self.plot.getAxis("bottom")
+        d = max((p-1)//(self.axis_labels-1), 1)
+        axis.setTicks([[(i, str(i)) for i in range(1, p + 1, d)]])
+
+    def setup_plot(self):
+        super().setup_plot()
+
+##Plot three
     def init_attr_values(self):
 
         #X = self.data
@@ -281,10 +961,10 @@ class OWPCA(widget.OWWidget):
 
         if self.standardize == True and self.centering == False:
             X_preprocessed = Normalize()(self.data.X)
-            XArray = numpy.copy(X_preprocessed)
+            XArray = np.copy(X_preprocessed)
         elif self.centering == True and self.standardize == False:
             X_preprocessed = self.data.X
-            XArray = numpy.copy(X_preprocessed)
+            XArray = np.copy(X_preprocessed)
 
         else:
             return
@@ -293,20 +973,20 @@ class OWPCA(widget.OWWidget):
         pca.fit(XArray)
         T = Xtransformed = pca.transform(XArray)
         P = pca.components_[:self.ncomponents, :]
-        X_pred = numpy.dot(T, P) + pca.mean_
+        X_pred = np.dot(T, P) + pca.mean_
 
         Err = XArray - X_pred
-        Q = numpy.sum(Err ** 2, axis=1)
+        Q = np.sum(Err ** 2, axis=1)
         Q = Q.reshape((len(Q),1))
 
         # Calculate Hotelling's T-squared (note that data are normalised by default)
-        Tsq = numpy.sum((T / numpy.std(T, axis=0)) ** 2, axis=1)
+        Tsq = np.sum((T / np.std(T, axis=0)) ** 2, axis=1)
         Tsq = Tsq.reshape((len(Tsq),1))
 
-        statistics = numpy.hstack((Tsq, Q))
+        statistics = np.hstack((Tsq, Q))
 
 
-        domain = numpy.array(['T²', 'Q'],
+        domain = np.array(['T²', 'Q'],
                             dtype=object)
 
         for i in range(len(domain)):
@@ -349,10 +1029,10 @@ class OWPCA(widget.OWWidget):
         # Calculate confidence level for T-squared from the ppf of the F distribution
         Tsq_conf = f.ppf(q=conf, dfn=self.ncomponents,dfd=self.data.X.shape[0]) * self.ncomponents * (self.data.X.shape[0] - 1) / (self.data.X.shape[0] - self.ncomponents)
         # Estimate the confidence level for the Q-residuals
-        Qsorted = numpy.sort(y)
+        Qsorted = np.sort(y)
         i = len(Qsorted)-1
 
-        while 1 - numpy.sum(y > Qsorted[i]) / numpy.sum(y > 0) > conf:
+        while 1 - np.sum(y > Qsorted[i]) / np.sum(y > 0) > conf:
             i -= 1
             if i == 0:
                 break
@@ -402,239 +1082,77 @@ class OWPCA(widget.OWWidget):
                                   y_axis_label=y_axis, legend=self.legend_box, tucl=Tsq_conf, qucl=Q_conf)
         self.unconditional_commit()
 
-    def fit(self):
-        self.clear()
-        self.Warning.trivial_components.clear()
-        if self.data is None:
-            return
-        data = self.data
-        if self.standardize:
-            self._pca_projector.preprocessors = \
-                self._pca_preprocessors + [preprocess.Normalize(center=True)]
-        else:
-            self._pca_projector.preprocessors = self._pca_preprocessors
-        if not isinstance(data, SqlTable):
-            Data = data[:]
-            pca = self._pca_projector(data)
-            variance_ratio = pca.explained_variance_ratio_
-            cumulative = numpy.cumsum(variance_ratio)
-            if len(pca.components_) >= 30:
-                COMPONENTS = 30
-            else:
-                COMPONENTS = pca.components_.shape[1]
-            pb = gui.ProgressBar(self, 10)
-            pbtwo = gui.ProgressBar(self, 10)
-            rmseCV, RMSECV = self.rmseCV(Data, COMPONENTS, pb=[pb,pbtwo])
-            pb.finish()
-            pbtwo.finish()
-            if numpy.isfinite(cumulative[-1]):
-                self.components_spin.setRange(0, len(cumulative))
-                self._pca = pca
-                self._variance_ratio = variance_ratio
-                self._cumulative = cumulative
-                self._RMSECV = RMSECV
-                self._rmseCV = rmseCV
-                self._COMPONENTS = COMPONENTS
-                self._setup_plot()
-            else:
-                self.Warning.trivial_components()
-            self.unconditional_commit()
-
-    def clear(self):
-
-        self._pca = None
-        self._transformed = None
-        self._variance_ratio = None
-        self._cumulative = None
-        self.plot.clear_plot()
-        self.plotTwo.clear_plot()
+    def _update_class_box(self):
         self.plotThree.clear_plot()
-        self._RMSECV = None
-        self._rmseCV = None
+        self._setup_plotThree(self.attr_x, self.attr_y)
 
-    def clear_outputs(self):
-        self.Outputs.data.send(None)
-        self.Outputs.transformed_data.send(None)
-        self.Outputs.transformed_testdata.send(None)
-        self.Outputs.components.send(None)
-        self.Outputs.pca.send(self._pca_projector)
-        self.Outputs.outlier.send(None)
-        self.Outputs.inlier.send(None)
+    def _update_legend_box(self):
+        self.plotThree.clear_plot()
+        self._setup_plotThree(self.attr_x, self.attr_y)
 
-    def _setup_plot(self):
-        if self._pca is None:
-            self.plot.clear_plot()
-            self.plot_two.clear_plot()
-            return
-
-        RMSECV = self._RMSECV
-        rmseCV = self._rmseCV
-        cutpos = self._nselected_components()
-        p = min(len(self._RMSECV), self.maxp)
-
-        self.plot.update(
-            numpy.arange(1, p+1), [RMSECV[:p,0], rmseCV[:p,0]],
-            [Qt.blue, Qt.red], cutpoint_x=cutpos, names=LINE_NAMES)
-        self.plot.setRange(yRange=(min(yi.min() for yi in [rmseCV, RMSECV]), max(yi.max() for yi in [rmseCV, RMSECV])))
-        explained_ratio = self._variance_ratio
-        explained = self._cumulative
-        cutposTwo = self._nselected_components_two()
-        pTwo = min(len(self._variance_ratio), self.maxp)
-
-        self.plotTwo.update(
-            numpy.arange(1, p+1), [explained_ratio[:pTwo], explained[:pTwo]],
-            [Qt.red, Qt.darkYellow], cutpoint_x=cutposTwo, names=LINE_NAMES_TWO)
-
-        self._update_axis()
-
-    def _on_cut_changed(self, components):
-
-        if components == self.ncomponents:
-            return
-        self._on_cut_changed_two(components)
-        self.ncomponents = components
-
-    def _on_cut_changed_two(self, components):
-
-        if components == self.ncomponents:
-            return
-        self.ncomponents = components
-        if self._pca is not None:
-            var = self._cumulative[components - 1]
-            if numpy.isfinite(var):
-                self.variance_covered = int(var * 100)
-        self._update_selection_component_spin()
-        self._update_selection_variance_spin()
-        self._invalidate_selection()
-
+##Plot four
     def _update_selection_component_spin(self):
 
-        if self._pca is None:
-            self._invalidate_selection()
-            return
+        self._update_plot_spin_selection(self.Principal_Component)
 
-        if self.ncomponents == 0:
+    def plot_spin_selection(self):
+        self._remove_spin_selection()
+        loadings = self.loadings[self.valid_loadings, self.graph_variables]
+        #, self.graph_variables
+        data = loadings[self.Principal_Component-1, :]
+        self._plot_spin_sel(data, np.where(self.valid_loadings)[0])
+        self.loadingsplot.view_box.add_profiles(data.X)
 
-            cut = self._COMPONENTS
-
+    def _update_plot_spin_selection(self, component):
+        self._remove_spin_selection()
+        loadings = self.loadings[self.valid_loadings, self.graph_variables]
+        if len(self.valid_loadings) < (component):
+            data = loadings[len(self.valid_loadings)-1, :]
+            self.Error.loading_not_available()
         else:
-            cut = self.ncomponents
-        var = self._cumulative[cut - 1]
-        if numpy.isfinite(var):
-            self.variance_covered = int(var * 100)
-        self.ncomponents = cut
-        self.plot.set_cut_point(cut)
-        self.plotTwo.set_cut_point(cut)
-        self.init_attr_values()
-        self._setup_plotThree(self.attr_x, self.attr_y)
-        self._invalidate_selection()
+            data = loadings[component-1, :]
+            self.Error.loading_not_available(shown=False)
+        self._plot_spin_sel(data, np.where(self.valid_loadings)[0])
+        self.loadingsplot.view_box.add_profiles(data.X)
 
-    def _update_selection_variance_spin(self):
+    def _remove_spin_selection(self):
+        for spin_sel in self.__spin_selection:
+            spin_sel.remove_items()
+        self.loadingsplot.view_box.remove_profiles()
+        self.__spin_selection = []
 
-        if self._pca is None:
-            self._invalidate_selection()
+    def _plot_spin_sel(self, data, indices, index=None):
+        color = self.__get_spin_sel_color(index)
+        spin_sel = Profilespin_sel(data, indices, color, self.loadingsplot)
+        kwargs = self.__get_visibility_flags()
+        spin_sel.set_visible_profiles(**kwargs)
+        self.__spin_selection.append(spin_sel)
+
+    def __get_spin_sel_color(self, index):
+
+        return QColor(LinePlotStyle.DEFAULT_COLOR)
+
+    def __get_visibility_flags(self):
+        return {"show_profiles": self.show_profiles,
+        }
+
+    def setup_loadingsplot(self):
+        if self.loadings is None:
             return
-        cut = numpy.searchsorted(self._cumulative,
-                                 self.variance_covered / 100.0) + 1
-        cut = min(cut, len(self._cumulative))
-        self.ncomponents = cut
-        self.plot.set_cut_point(cut)
-        self.plotTwo.set_cut_point(cut)
-        self.init_attr_values()
-        self._setup_plotThree(self.attr_x, self.attr_y)
-        self._invalidate_selection()
 
-    def preprocess(data, preprocessors):
+        ticks = [a.name for a in self.graph_variables]
+        #data = self.data[self.valid_loadings, self.graph_variables]
+        #datalist = list(data.X[self.Principal_Component-1, :])
+        #ticks2 = [str(a) for a in datalist]
+        self.loadingsplot.getAxis("bottom").set_ticks(ticks)
+        #self.loadingsplot.getAxis("left")
 
-        for pp in preprocessors:
-            data = pp(data)
-        return data
+        #self.loadingsplot.getAxis("left")
+        self.plot_spin_selection()
+        self.loadingsplot.view_box.enableAutoRange()
+        self.loadingsplot.view_box.updateAutoRange()
 
-    def rmseCV(self, data, ncomponents, pb):
-
-        if self.standardize == True and self.centering == False:
-            X_preprocessed = Normalize()(data.X)
-            XArray = numpy.copy(X_preprocessed)
-        elif self.centering == True and self.standardize == False:
-            X_preprocessed = Center()(data.X)
-            XArray = numpy.copy(X_preprocessed)
-
-        n_splits = 10
-        Kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
-        rmseCV_list_matrix = []
-        pca = sklearnPCA(random_state=42, svd_solver='full')
-        for train_index, test_index in Kf.split(XArray):
-            X_train, X_test = XArray[train_index], XArray[test_index]
-            pca.fit(X_train)
-            def innerfunctwo(index):
-                X_testtransformed = numpy.dot(X_test, pca.components_.T[:,:index])
-                X_test_pred = numpy.dot(X_testtransformed, pca.components_[:index,:])
-                rmseCV = numpy.sum((X_test - X_test_pred)**2)
-                return rmseCV
-
-            rmseCV_list = [innerfunctwo(index=index) for index in range(1,ncomponents+1,1)]
-            rmseCVarray = numpy.array(rmseCV_list)
-            rmseCV_list_matrix.append(rmseCVarray)
-            pb[1].advance()
-        rmseCVMatrix = numpy.array(rmseCV_list_matrix)
-        rmseCV = numpy.sum(rmseCVMatrix,0)
-        rmseCV = numpy.sqrt(rmseCV/(XArray.shape[0]*XArray.shape[1]))
-        rmseCV = rmseCV/rmseCV.max()
-        rmseCVrowwise = rmseCV.reshape((len(rmseCV), 1))
-
-
-        KF = KFold(n_splits=n_splits, shuffle=True, random_state=42)
-        i = 0
-        pcatwo = sklearnPCA(random_state=42, svd_solver='full')
-        for train_index, test_index in KF.split(XArray):
-            X_train, X_test = XArray[train_index], XArray[test_index]
-            pcatwo.fit(X_train)
-            X_test_transposed = X_test.T
-            if X_test_transposed.shape[0] >= 5:
-                numberOfFolds = 5
-            else:
-                numberOfFolds = X_test_transposed.shape[0]
-            def innerfunctwo(index):
-                P = pcatwo.components_.T[:, :index]
-                kf = KFold(n_splits=numberOfFolds, shuffle=True, random_state=42)
-                residual_list = []
-                for reduced_index, rest_index in kf.split(X_test_transposed):
-                    X_test_reduced_transposed, X_test_rest_transposed = X_test_transposed[reduced_index], X_test_transposed[rest_index]
-                    X_test_reduced = X_test_reduced_transposed.T
-                    P_reduced = P[reduced_index]
-                    P_rest = P[rest_index]
-                    X_test_rest = X_test_rest_transposed.T
-                    t_reduced = numpy.dot(X_test_reduced, P_reduced)
-                    X_test_rest_pred = numpy.dot(t_reduced, P_rest.T)
-                    residual_list.append(X_test_rest-X_test_rest_pred)
-                c = 0
-                for cols in residual_list:
-                    if c == 0:
-                        residuals = cols
-                        c = c + 1
-                    else:
-                        residuals = numpy.hstack((residuals, cols))
-                return residuals
-            ResidualsPerComp_list = [innerfunctwo(index=index) for index in range(1,ncomponents+1,1)]
-            k = 0
-            if i == 0:
-                RMSECV = numpy.empty((ncomponents, n_splits))
-                for mat in ResidualsPerComp_list:
-                    RMSECV[k,i] = numpy.sum(mat ** 2)
-                    k = k + 1
-                i = i + 1
-            else:
-                for mat in ResidualsPerComp_list:
-                    RMSECV[k, i] = numpy.sum(mat ** 2)
-                    k = k + 1
-                i = i + 1
-            pb[0].advance()
-        RMSECV = numpy.sum(RMSECV, axis=1)
-        RMSECV = numpy.sqrt(RMSECV/(XArray.shape[0]*XArray.shape[1]))
-        RMSECV = RMSECV/RMSECV.max()
-        rmseCVbyEigen = RMSECV.reshape((len(RMSECV),1))
-        return rmseCVrowwise, rmseCVbyEigen
-
+##All plots
     def _update_standardize(self):
 
         if self.standardize:
@@ -648,10 +1166,6 @@ class OWPCA(widget.OWWidget):
         else:
             self.init_attr_values()
             self._setup_plotThree(self.attr_x, self.attr_y)
-
-    def setProgressValue(self, value):
-
-        self.progressBarSet(value)
 
     def _update_centering(self):
 
@@ -667,171 +1181,62 @@ class OWPCA(widget.OWWidget):
             self.init_attr_values()
             self._setup_plotThree(self.attr_x, self.attr_y)
 
-    def _update_class_box(self):
-        self.plotThree.clear_plot()
-        self._setup_plotThree(self.attr_x, self.attr_y)
 
-    def _update_legend_box(self):
-        self.plotThree.clear_plot()
-        self._setup_plotThree(self.attr_x, self.attr_y)
 
-    def _init_projector(self):
 
-        self._pca_projector = PCA(n_components=MAX_COMPONENTS, random_state=0)
-        self._pca_projector.component = self.ncomponents
-        self._pca_preprocessors = PCA.preprocessors
 
-    def _nselected_components(self):
 
-        """Return the number of selected components."""
-        if self._pca is None:
-            return 0
-        if self.ncomponents == 0:
-            max_comp = self._COMPONENTS
-        else:
-            max_comp = self.ncomponents
-        RMSE_max = self._RMSECV[max_comp - 1]
-        cut = max_comp
-        assert numpy.isfinite(RMSE_max)
-        return cut
 
-    def _nselected_components_two(self):
-        """Return the number of selected components."""
-        if self._pca is None:
-            return 0
-        if self.ncomponents == 0:
-            max_comp = len(self._variance_ratio)
-        else:
-            max_comp = self.ncomponents
-        var_max = self._cumulative[max_comp - 1]
-        if var_max != numpy.floor(self.variance_covered / 100.0):
-            cut = max_comp
-            assert numpy.isfinite(var_max)
-            self.variance_covered = int(var_max * 100)
-        else:
-            self.ncomponents = cut = numpy.searchsorted(
-                self._cumulative, self.variance_covered / 100.0) + 1
-        return cut
 
-    def _invalidate_selection(self):
-        self.commit()
 
-    def _update_axis(self):
-        p = min(len(self._RMSECV), self.maxp)
-        axis = self.plot.getAxis("bottom")
-        d = max((p-1)//(self.axis_labels-1), 1)
-        axis.setTicks([[(i, str(i)) for i in range(1, p + 1, d)]])
 
-    def commit(self):
-        inlier = outlier  = transformed = transformed_testdata = data = components = None
-        if self._pca is not None:
-            if self._transformed is None:
-                self._transformed = self._pca(self.data)
 
-            transformed = self._transformed
-            explVar = numpy.array(self._variance_ratio, ndmin=2)
-            explVarFlo = [k for k in explVar]
-            a = [str(i)  for i in transformed.domain.attributes[:self.ncomponents]]
-            b = [" (" + str(numpy.around(i*100, decimals=2)) + "%) " for i in explVarFlo[0][:self.ncomponents]]
-            Domainfinal = [a[i] + b[i] for i in range(self.ncomponents)]
-            domainFinal = Domain(
-                [ContinuousVariable(name, compute_value=lambda _: None)
-                              for name in Domainfinal],
-                self.data.domain.class_vars,
-                self.data.domain.metas
-            )
-            domain = Domain(
-                transformed.domain.attributes[:self.ncomponents],
-                self.data.domain.class_vars,
-                self.data.domain.metas
-            )
-            transformed = transformed.from_table(domain, transformed)
-            transformed.domain = domainFinal
-            if self._testdata_transformed is not None:
-                transformed_testdata = self._testdata_transformed
-                domainzwo = Domain(
-                    transformed_testdata.domain.attributes[:self.ncomponents],
-                    self.data.domain.class_vars,
-                    self.data.domain.metas
-                )
-                transformed_testdata = transformed_testdata.from_table(domainzwo, transformed_testdata)
-                transformed_testdata.domain = domainFinal
+
+
+
+
+
+
+
+
+
+
+
+    def check_loadings(self):
+        def error(err):
+            err()
+            self.loadings = None
+
+        self.clear_messages()
+
+        if self.loadings is not None:
+            self.graph_variables = [var for var in self.loadings.domain.attributes
+                                    if var.is_continuous]
+
+            self.valid_loadings = ~countnans(self.loadings.X, axis=1).astype(bool)
+            if len(self.graph_variables) < 1:
+                error(self.Error.not_enough_attrs)
+            elif not np.sum(self.valid_loadings):
+                error(self.Error.no_valid_loadings)
             else:
-                transformed_testdata = None
-            proposed = [a.name for a in self._pca.orig_domain.attributes]
-            meta_name = get_unique_names(proposed, 'components')
-            dom = Domain(
-                [ContinuousVariable(name, compute_value=lambda _: None)
-                 for name in proposed],
-                metas=[StringVariable(name=meta_name)])
-            metas = numpy.array([['PC{}'.format(i + 1)
-                                  for i in range(self.ncomponents)]],
-                                dtype=object).T
+                if not np.all(self.valid_loadings):
+                    self.Information.hidden_instances()
+                if len(self.graph_variables) > MAX_FEATURES:
+                    self.Information.too_many_features()
+                    self.graph_variables = self.graph_variables[:MAX_FEATURES]
 
-            metas4 = numpy.array([['id'
-                                   ]],
-                                 dtype=object)
+    def check_display_options(self):
+        self.Warning.no_display_option.clear()
+        if self.loadings is not None:
+            if not (self.show_profiles):
+                self.Warning.no_display_option()
 
-            components = Table(dom, self._pca.components_[:self.ncomponents,:],
-                               metas=metas)
-            components.name = 'components'
-
-            data_dom = Domain(
-                self.data.domain.attributes,
-                self.data.domain.class_vars,
-                self.data.domain.metas + domain.attributes)
-            data = Table.from_numpy(
-                data_dom, self.data.X, self.data.Y,
-                numpy.hstack((self.data.metas, transformed.X)),
-                ids=self.data.ids)
-
-            inlier = self.inlier_data
-            outlier = self.outlier_data
-        self._pca_projector.component = self.ncomponents
-        self.Outputs.data.send(data)
-        self.Outputs.transformed_data.send(transformed)
-        self.Outputs.transformed_testdata.send(transformed_testdata)
-        self.Outputs.components.send(components)
-        self.Outputs.pca.send(self._pca_projector)
-        self.Outputs.outlier.send(outlier)
-        self.Outputs.inlier.send(inlier)
-
-    def send_report(self):
-
-        if self.data is None:
-            return
-        self.report_plot("Reconstruction Error", self.plot)
-        self.report_plot("Explained Variance", self.plotTwo)
-        self.report_plot("T²/Q", self.plotThree)
-
-    def setup_plot(self):
-        super().setup_plot()
-
-    @classmethod
-    def migrate_settings(cls, settings, version):
-        if "variance_covered" in settings:
-            # Due to the error in gh-1896 the variance_covered was persisted
-            # as a NaN value, causing a TypeError in the widgets `__init__`.
-            vc = settings["variance_covered"]
-            if isinstance(vc, numbers.Real):
-                if numpy.isfinite(vc):
-                    vc = int(vc)
-                else:
-                    vc = 100
-                settings["variance_covered"] = vc
-        if settings.get("ncomponents", 0) > MAX_COMPONENTS:
-            settings["ncomponents"] = MAX_COMPONENTS
-
-        # Remove old `decomposition_idx` when SVD was still included
-        settings.pop("decomposition_idx", None)
-
-        # Remove RemotePCA settings
-        settings.pop("batch_size", None)
-        settings.pop("address", None)
-        settings.pop("auto_update", None)
+    def _set_input_summary(self):
+        summary = len(self.loadings) if self.loadings else self.info.NoInput
+        details = format_summary_details(self.loadings) if self.loadings else ""
+        self.info.set_input_summary(summary, details)
 
 if __name__ == "__main__":
-    import numpy
     from sklearn.model_selection import KFold
     data = Table("iris")
     #data = Table("brown-selected")
