@@ -90,7 +90,7 @@ def line_intersects_profiles(p1, p2, table):
 class LinePlotStyle:
     DEFAULT_COLOR = QColor(Qt.blue)
 
-    UNSELECTED_LINE_ALPHA = 170
+    UNSELECTED_LINE_ALPHA = 255
 
 class LinePlotAxisItem(pg.AxisItem):
     def __init__(self, *args, **kwargs):
@@ -241,7 +241,7 @@ class Profilespin_sel:
         return x, y, connect
 
     @staticmethod
-    def make_pen(color, width=3):
+    def make_pen(color, width=1):
         pen = QPen(color, width)
         pen.setCosmetic(True)
         return pen
