@@ -789,6 +789,7 @@ class OWPCA(widget.OWWidget):
         self.report_plot("Reconstruction Error", self.plot)
         self.report_plot("Explained Variance", self.plotTwo)
         self.report_plot("T²/Q", self.plotThree)
+        self.report_plot(f'Loadings plot of principal component {self.Principal_Component}', self.loadingsplot)
 
     @classmethod
     def migrate_settings(cls, settings, version):
@@ -1152,6 +1153,40 @@ class OWPCA(widget.OWWidget):
         self.loadingsplot.view_box.enableAutoRange()
         self.loadingsplot.view_box.updateAutoRange()
 
+    def check_loadings(self):
+        def error(err):
+            err()
+            self.loadings = None
+
+        self.clear_messages()
+
+        if self.loadings is not None:
+            self.graph_variables = [var for var in self.loadings.domain.attributes
+                                    if var.is_continuous]
+
+            self.valid_loadings = ~countnans(self.loadings.X, axis=1).astype(bool)
+            if len(self.graph_variables) < 1:
+                error(self.Error.not_enough_attrs)
+            elif not np.sum(self.valid_loadings):
+                error(self.Error.no_valid_loadings)
+            else:
+                if not np.all(self.valid_loadings):
+                    self.Information.hidden_instances()
+                if len(self.graph_variables) > MAX_FEATURES:
+                    self.Information.too_many_features()
+                    self.graph_variables = self.graph_variables[:MAX_FEATURES]
+
+    def check_display_options(self):
+        self.Warning.no_display_option.clear()
+        if self.loadings is not None:
+            if not (self.show_profiles):
+                self.Warning.no_display_option()
+
+    def _set_input_summary(self):
+        summary = len(self.loadings) if self.loadings else self.info.NoInput
+        details = format_summary_details(self.loadings) if self.loadings else ""
+        self.info.set_input_summary(summary, details)
+
 ##All plots
     def _update_standardize(self):
 
@@ -1186,55 +1221,6 @@ class OWPCA(widget.OWWidget):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    def check_loadings(self):
-        def error(err):
-            err()
-            self.loadings = None
-
-        self.clear_messages()
-
-        if self.loadings is not None:
-            self.graph_variables = [var for var in self.loadings.domain.attributes
-                                    if var.is_continuous]
-
-            self.valid_loadings = ~countnans(self.loadings.X, axis=1).astype(bool)
-            if len(self.graph_variables) < 1:
-                error(self.Error.not_enough_attrs)
-            elif not np.sum(self.valid_loadings):
-                error(self.Error.no_valid_loadings)
-            else:
-                if not np.all(self.valid_loadings):
-                    self.Information.hidden_instances()
-                if len(self.graph_variables) > MAX_FEATURES:
-                    self.Information.too_many_features()
-                    self.graph_variables = self.graph_variables[:MAX_FEATURES]
-
-    def check_display_options(self):
-        self.Warning.no_display_option.clear()
-        if self.loadings is not None:
-            if not (self.show_profiles):
-                self.Warning.no_display_option()
-
-    def _set_input_summary(self):
-        summary = len(self.loadings) if self.loadings else self.info.NoInput
-        details = format_summary_details(self.loadings) if self.loadings else ""
-        self.info.set_input_summary(summary, details)
 
 if __name__ == "__main__":
     from sklearn.model_selection import KFold
