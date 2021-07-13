@@ -821,6 +821,7 @@ class OWPCA(widget.OWWidget):
         self.report_plot("Explained Variance", self.plotTwo)
         self.report_plot("T²/Q", self.plotThree)
         self.report_plot(f'Loadings plot of principal component {self.Principal_Component}', self.loadingsplot)
+        self.report_plot(f'Score plot {self.score_x} vs. {self.score_y}', self.scoreplot)
 
     @classmethod
     def migrate_settings(cls, settings, version):
@@ -989,7 +990,7 @@ class OWPCA(widget.OWWidget):
     def setup_plot(self):
         super().setup_plot()
 
-##Plot three
+##T²/Q plot
     def init_attr_values(self):
 
         #X = self.data
@@ -1128,7 +1129,7 @@ class OWPCA(widget.OWWidget):
         self._setup_plotThree(self.attr_x, self.attr_y)
         self.scoreplot.clear_plot()
         self._setup_score_plot(self.score_x, self.score_y)
-##Plot four
+##Loadings plot
     def _update_selection_component_spin(self):
 
         self._update_plot_spin_selection(self.Principal_Component)
