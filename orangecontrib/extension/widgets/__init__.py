@@ -3,7 +3,7 @@ import sysconfig
 
 
 
-NAME = "Extension"
+NAME = "Charisma toolbox 1"
 DESCRIPTION = "Contains widgets to perform and evaluate ordinary linear regression and partial least squares regression on data," \
               "as well as widgets to perform and evaluate principal component analysis on data and enables linear discriminant analysis for raw data and score data from pca."
 BACKGROUND = "#4AE714"

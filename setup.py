@@ -2,7 +2,7 @@ from os import path, walk
 import sys
 from setuptools import setup, find_packages
 
-NAME = "AKWellerExtension"
+NAME = "Charisma toolbox 1"
 VERSION = "0.0.1"
 DESCRIPTION = "Add-ons providing tools for chemometric data analysis"
 #LONG_DESCRIPTION = open(path.join(path.dirname(__file__), 'README.md')).read()
@@ -29,13 +29,13 @@ ENTRY_POINTS = {
     # Entry points that marks this package as an orange add-on. If set, addon will
     # be shown in the add-ons manager even if not published on PyPi.
     'orange3.addon': (
-        'Extension = orangecontrib.extension',
+        'Charisma toolbox 1 = orangecontrib.extension',
     ),
     # Entry point used to specify packages containing tutorials accessible
     # from welcome screen. Tutorials are saved Orange Workflows (.ows files).
     'orange.widgets.tutorials': (
         # Syntax: any_text = path.to.package.containing.tutorials
-        'Extension Tutorials = orangecontrib.extension.tutorials',
+        'Charisma toolbox 1 Tutorials = orangecontrib.extension.tutorials',
     ),
 
     # Entry point used to specify packages containing widgets.
@@ -43,7 +43,7 @@ ENTRY_POINTS = {
         # Syntax: category name = path.to.package.containing.widgets
         # Widget category specification can be seen in
         #    orangecontrib/extension/widgets/__init__.py
-        'Extension = orangecontrib.extension.widgets',
+        'Charisma toolbox 1 = orangecontrib.extension.widgets',
     ),
 
     # Register widget help

@@ -11,7 +11,7 @@ from AnyQt.QtCore import Qt, QSize, QLineF, pyqtSignal as Signal
 from AnyQt.QtGui import QPainter, QPen, QColor
 from AnyQt.QtWidgets import QApplication, QGraphicsLineItem
 from AnyQt.QtWidgets import QFormLayout
-from Orange.data import Table, Domain, StringVariable, ContinuousVariable, DiscreteVariable
+from Orange.data import Table, Domain, StringVariable, ContinuousVariable, DiscreteVariable, Variable
 from Orange.data.util import get_unique_names
 from Orange.data.sql.table import SqlTable, AUTO_DL_LIMIT
 from Orange.statistics.util import countnans, nanmean, nanmin, nanmax, nanstd
@@ -44,6 +44,9 @@ from Orange.widgets.utils.sql import check_sql_input
 from Orange.widgets.utils.state_summary import format_summary_details
 from Orange.widgets.visualize.owdistributions import LegendItem
 from Orange.widgets.widget import OWWidget, Input, Output, Msg
+
+
+from orangecontrib.extension.utils import scattergraph
 
 
 def ccw(a, b, c):
@@ -251,13 +254,6 @@ MAX_COMPONENTS = 100
 LINE_NAMES = ["RMSECV by Eigen", "RMSECV row-wise"]
 LINE_NAMES_TWO = ["component variance", "cumulative variance"]
 
-
-
-
-
-
-
-
 class OWPCA(widget.OWWidget):
 
     name = "PCA"
@@ -281,7 +277,6 @@ class OWPCA(widget.OWWidget):
         inlier = Output("Outlier corrected Dataset", Table)
         pca = Output("PCA", PCA, dynamic=False)
 
-
     Clvl = [68.3, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 95.4, 99.7, 99.9]
 
     variance_covered = settings.Setting(100)
@@ -297,6 +292,12 @@ class OWPCA(widget.OWWidget):
     confidence = settings.Setting(6)
     Principal_Component = Setting(1)
     show_profiles = Setting(True)
+    class_box = Setting(True)
+    legend_box = Setting(False)
+
+    selection = ContextSetting(set())
+    score_x = ContextSetting(None)
+    score_y = ContextSetting(None)
 
     graph_name = "plot.plotItem"
 
@@ -318,6 +319,12 @@ class OWPCA(widget.OWWidget):
         too_many_features = Msg("Data has too many features. Only first {}"
                                 " are shown.".format(MAX_FEATURES))
 
+    xy_changed_manually = Signal(Variable, Variable)
+    common_options = dict(
+        labelWidth=50, orientation=Qt.Horizontal, sendSelectedValue=True,
+        contentsLength=14
+    )
+
     def __init__(self):
 
         dmod = DomainModel
@@ -332,6 +339,7 @@ class OWPCA(widget.OWWidget):
         self._variance_ratio = None
         self._cumulative = None
         self.domainIndexes = {}
+        self.domainIndexesScore = {}
         self._RMSECV = None
         self._rmseCV = None
         self._statistics = None
@@ -422,13 +430,28 @@ class OWPCA(widget.OWWidget):
         )
         lform.addRow("Component:", self.component_spin)
 
+        sbox = gui.vBox(self.controlArea, "Discriminant function selection")
+        sform = QFormLayout()
+        sbox.layout().addLayout(sform)
 
+        dmod = DomainModel
+        self.xy_modelScore = DomainModel(dmod.MIXED, valid_types=ContinuousVariable)
+        self.cb_score_x = gui.comboBox(
+            sbox, self, "score_x", label=None,
+            callback=self.set_attr_from_combo,
+            model=self.xy_modelScore, **self.common_options,
+            searchable=True)
+        self.cb_score_y = gui.comboBox(
+            sbox, self, "score_y", label=None,
+            callback=self.set_attr_from_combo,
+            model=self.xy_modelScore, **self.common_options,
+            searchable=True)
 
-
+        sform.addRow("Axis x:", self.cb_score_x)
+        sform.addRow("Axis y:", self.cb_score_y)
 
         self.controlArea.layout().addStretch()
         gui.auto_apply(self.controlArea, self, "auto_commit")
-
 
         self.plot = SliderGraph(
             "Principal Components", "RMSECV",
@@ -439,6 +462,7 @@ class OWPCA(widget.OWWidget):
 
         self.plotThree = ControlChart.ScatterGraph(callback=None)
         self.loadingsplot = LinePlotGraph(self, y_axis_label="Loadings")
+        self.scoreplot = scattergraph.ScatterGraph(callback=None)
 
 
         tabs = tabWidget(self.mainArea)
@@ -456,6 +480,10 @@ class OWPCA(widget.OWWidget):
 
         tab = createTabPage(tabs, "Loadings plot")
         tab.layout().addWidget(self.loadingsplot)
+
+        tab = createTabPage(tabs, "Scatterplot")
+        tab.layout().addWidget(self.scoreplot)
+
 
         self._update_centering()
 ##Process input data
@@ -499,6 +527,8 @@ class OWPCA(widget.OWWidget):
             self.fit()
             self.init_attr_values()
             self._setup_plotThree(self.attr_x, self.attr_y)
+            self.init_score_values()
+            self._setup_score_plot(self.score_x, self.score_y)
             self.unconditional_commit()
 
     @Inputs.testdata
@@ -762,6 +792,7 @@ class OWPCA(widget.OWWidget):
 
         self._pca = None
         self._transformed = None
+        self._Transformed = None
         self._variance_ratio = None
         self._cumulative = None
         self.plot.clear_plot()
@@ -888,6 +919,8 @@ class OWPCA(widget.OWWidget):
         self.plotTwo.set_cut_point(cut)
         self.init_attr_values()
         self._setup_plotThree(self.attr_x, self.attr_y)
+        self.init_score_values()
+        self._setup_score_plot(self.score_x, self.score_y)
         self._invalidate_selection()
         if self._pca is not None:
             self.loadings = self.components
@@ -907,6 +940,8 @@ class OWPCA(widget.OWWidget):
         self.plotTwo.set_cut_point(cut)
         self.init_attr_values()
         self._setup_plotThree(self.attr_x, self.attr_y)
+        self.init_score_values()
+        self._setup_score_plot(self.score_x, self.score_y)
         self._invalidate_selection()
         if self._pca is not None:
             self.loadings = self.components
@@ -1086,11 +1121,13 @@ class OWPCA(widget.OWWidget):
     def _update_class_box(self):
         self.plotThree.clear_plot()
         self._setup_plotThree(self.attr_x, self.attr_y)
-
+        self.scoreplot.clear_plot()
+        self._setup_score_plot(self.score_x, self.score_y)
     def _update_legend_box(self):
         self.plotThree.clear_plot()
         self._setup_plotThree(self.attr_x, self.attr_y)
-
+        self.scoreplot.clear_plot()
+        self._setup_score_plot(self.score_x, self.score_y)
 ##Plot four
     def _update_selection_component_spin(self):
 
@@ -1187,6 +1224,63 @@ class OWPCA(widget.OWWidget):
         details = format_summary_details(self.loadings) if self.loadings else ""
         self.info.set_input_summary(summary, details)
 
+##Score plot
+
+    def set_attr_from_combo(self):
+        self.score_changed()
+        self.xy_changed_manually.emit(self.score_x, self.score_y)
+
+    def score_changed(self):
+        self._setup_score_plot(self.score_x, self.score_y)
+        self.commit()
+
+    def _setup_score_plot(self, x_axis, y_axis):
+
+        self.scoreplot.clear_plot()
+        if self._pca is None:
+            self.scoreplot.clear_plot()
+            return
+
+
+        x=self._Transformed.X[:,self.domainIndexesScore[str(self.score_x)]]
+        y=self._Transformed.X[:,self.domainIndexesScore[str(self.score_y)]]
+
+        if self.class_box:
+
+            self.PlotStyle = [
+                dict(pen=None, symbolBrush=self.SYMBOLBRUSH[i], symbolPen=self.SYMBOLPEN[i], symbol='o', symbolSize=10,
+                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
+
+            self.scoreplot.update(x,y, Style=self.PlotStyle, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box)
+        else:
+
+            self.Style = [
+                dict(pen=None, symbolBrush=self.SYMBOLBRUSH[0], symbolPen=self.SYMBOLPEN[0], symbol='o', symbolSize=10,
+                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
+            self.scoreplot.update(x, y, Style=self.Style, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box)
+
+    def init_score_values(self):
+
+        datatrans = self._transformed.X
+        domain = np.array(['PC {}'.format(i + 1)
+                              for i in range(datatrans.shape[1])],
+                            dtype=object)
+
+        for i in range(len(domain)):
+            self.domainIndexesScore[domain[i]] = i
+
+        proposed = [a for a in domain]
+
+        dom = Domain(
+            [ContinuousVariable(name, compute_value=lambda _: None)
+             for name in proposed],
+            metas=None)
+        self._Transformed = Table(dom, datatrans, metas=None)
+        self.xy_modelScore.set_domain(dom)
+        self.score_x = self.xy_modelScore[0] if self.xy_modelScore else None
+        self.score_y = self.xy_modelScore[1] if len(self.xy_modelScore) >= 2 \
+            else self.attr_x
+
 ##All plots
     def _update_standardize(self):
 
@@ -1201,6 +1295,8 @@ class OWPCA(widget.OWWidget):
         else:
             self.init_attr_values()
             self._setup_plotThree(self.attr_x, self.attr_y)
+            self.init_score_values()
+            self._setup_score_plot(self.score_x, self.score_y)
 
     def _update_centering(self):
 
@@ -1215,12 +1311,8 @@ class OWPCA(widget.OWWidget):
         else:
             self.init_attr_values()
             self._setup_plotThree(self.attr_x, self.attr_y)
-
-
-
-
-
-
+            self.init_score_values()
+            self._setup_score_plot(self.score_x, self.score_y)
 
 if __name__ == "__main__":
     from sklearn.model_selection import KFold
