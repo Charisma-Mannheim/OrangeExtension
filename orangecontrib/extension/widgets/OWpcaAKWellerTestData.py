@@ -294,6 +294,7 @@ class OWPCA(widget.OWWidget):
     show_profiles = Setting(True)
     class_box = Setting(True)
     legend_box = Setting(False)
+    testdata_box = Setting(False)
 
     selection = ContextSetting(set())
     score_x = ContextSetting(None)
@@ -344,7 +345,8 @@ class OWPCA(widget.OWWidget):
         self._rmseCV = None
         self._statistics = None
         self.train_classes = None
-        self.train_datalabel = None
+        self.datalabel = None
+        self.datalabelqt = None
         self.classes = None
         self.outlier_metas = None
         self.inlier_data = None
@@ -354,11 +356,11 @@ class OWPCA(widget.OWWidget):
         self.__spin_selection = []
         self.loadings = None
 
-        self.SYMBOLBRUSH = [(0, 204, 204, 180), (51, 255, 51, 180), (255, 51, 51, 180), (0, 128, 0, 180), (19, 234, 201, 180), \
+        self.SYMBOLBRUSH = [(0, 204, 204, 180), (51, 255, 51, 180), (255, 51, 51, 180), (0, 128, 0, 180),  \
                        (195, 46, 212, 180), (250, 194, 5, 180), (55, 55, 55, 180), (0, 114, 189, 180), (217, 83, 25, 180), (237, 177, 32, 180), \
                        (126, 47, 142, 180), (119, 172, 180)]
 
-        self.SYMBOLPEN = [(0, 204, 204, 255), (51, 255, 51, 255), (255, 51, 51, 255), (0, 128, 0, 255), (19, 234, 201, 255), \
+        self.SYMBOLPEN = [(0, 204, 204, 255), (51, 255, 51, 255), (255, 51, 51, 255), (0, 128, 0, 255),  \
                        (195, 46, 212, 255), (250, 194, 5, 255), (55, 55, 55, 255), (0, 114, 189, 255), (217, 83, 25, 255), (237, 177, 32, 255), \
                        (126, 47, 142, 255), (119, 172, 255)]
 
@@ -403,7 +405,7 @@ class OWPCA(widget.OWWidget):
             label="Show only first", callback=self._setup_plot
         )
 
-        class_box = gui.vBox(self.controlArea, "Control chart options")
+        class_box = gui.vBox(self.controlArea, "Control chart and score plot options")
 
         self.classb = gui.checkBox(class_box,
             self, value="class_box", label="Color by class",
@@ -412,6 +414,10 @@ class OWPCA(widget.OWWidget):
         self.legendb = gui.checkBox(class_box,
             self, value="legend_box", label="Show legend",
             callback=self._update_legend_box, tooltip=None)
+
+        self.testdatab = gui.checkBox(class_box,
+            self, value="testdata_box", label="Show test data",
+            callback=self._update_testdata_box, tooltip=None)
 
         gui.comboBox(
             class_box, self, "confidence", label="Shown level of confidence: ",
@@ -481,7 +487,7 @@ class OWPCA(widget.OWWidget):
         tab = createTabPage(tabs, "Loadings plot")
         tab.layout().addWidget(self.loadingsplot)
 
-        tab = createTabPage(tabs, "Scatterplot")
+        tab = createTabPage(tabs, "Score plot")
         tab.layout().addWidget(self.scoreplot)
 
 
@@ -523,7 +529,7 @@ class OWPCA(widget.OWWidget):
                                       np.arange(0, len(self.data.domain.class_var.values))}
             else:
                 self.classes = None
-            self.train_datalabel = self.data.Y
+
             self.fit()
             self.init_attr_values()
             self._setup_plotThree(self.attr_x, self.attr_y)
@@ -558,6 +564,11 @@ class OWPCA(widget.OWWidget):
                 return
             self._testdata_transformed = self.testdata_transform(self.testdata, self._pca)
 
+        if self.testdata_box:
+            self.init_attr_values()
+            self._setup_plotThree(self.attr_x, self.attr_y)
+            self.init_score_values()
+            self._setup_score_plot(self.score_x, self.score_y)
         self.unconditional_commit()
 
     def testdata_transform(self, data, projector):
@@ -617,12 +628,13 @@ class OWPCA(widget.OWWidget):
         return data
 
     def rmseCV(self, data, ncomponents, pb):
-
+        normalizer = Normalize()
+        centerer = Center()
         if self.standardize == True and self.centering == False:
-            X_preprocessed = Normalize()(data.X)
+            X_preprocessed = normalizer.fit_transform(data.X)
             XArray = np.copy(X_preprocessed)
         elif self.centering == True and self.standardize == False:
-            X_preprocessed = Center()(data.X)
+            X_preprocessed = centerer.fit_transform(data.X)
             XArray = np.copy(X_preprocessed)
 
         n_splits = 10
@@ -635,7 +647,13 @@ class OWPCA(widget.OWWidget):
             def innerfunctwo(index):
                 X_testtransformed = np.dot(X_test, pca.components_.T[:,:index])
                 X_test_pred = np.dot(X_testtransformed, pca.components_[:index,:])
-                rmseCV = np.sum((X_test - X_test_pred)**2)
+                if self.standardize == True and self.centering == False:
+                    X_testIT = normalizer.inverse_transform(X_test)
+                    X_test_predIT = normalizer.inverse_transform(X_test_pred)
+                elif self.centering == True and self.standardize == False:
+                    X_testIT = centerer.inverse_transform(X_test)
+                    X_test_predIT = centerer.inverse_transform(X_test_pred)
+                rmseCV = np.sum((X_testIT - X_test_predIT)**2)
                 return rmseCV
 
             rmseCV_list = [innerfunctwo(index=index) for index in range(1,ncomponents+1,1)]
@@ -672,7 +690,13 @@ class OWPCA(widget.OWWidget):
                     X_test_rest = X_test_rest_transposed.T
                     t_reduced = np.dot(X_test_reduced, P_reduced)
                     X_test_rest_pred = np.dot(t_reduced, P_rest.T)
-                    residual_list.append(X_test_rest-X_test_rest_pred)
+                    if self.standardize == True and self.centering == False:
+                        X_test_restIT = normalizer.inverse_transform(X_test_rest, rest_index)
+                        X_test_rest_predIT = normalizer.inverse_transform(X_test_rest_pred, rest_index)
+                    elif self.centering == True and self.standardize == False:
+                        X_test_restIT = centerer.inverse_transform(X_test_rest, rest_index)
+                        X_test_rest_predIT = centerer.inverse_transform(X_test_rest_pred, rest_index)
+                    residual_list.append(X_test_restIT-X_test_rest_predIT)
                 c = 0
                 for cols in residual_list:
                     if c == 0:
@@ -922,6 +946,8 @@ class OWPCA(widget.OWWidget):
         self._setup_plotThree(self.attr_x, self.attr_y)
         self.init_score_values()
         self._setup_score_plot(self.score_x, self.score_y)
+        if self.ncomponents < self.Principal_Component:
+            self.Principal_Component = self.ncomponents
         self._invalidate_selection()
         if self._pca is not None:
             self.loadings = self.components
@@ -937,6 +963,8 @@ class OWPCA(widget.OWWidget):
                                  self.variance_covered / 100.0) + 1
         cut = min(cut, len(self._cumulative))
         self.ncomponents = cut
+        if self.ncomponents < self.Principal_Component:
+            self.Principal_Component = self.ncomponents
         self.plot.set_cut_point(cut)
         self.plotTwo.set_cut_point(cut)
         self.init_attr_values()
@@ -993,14 +1021,20 @@ class OWPCA(widget.OWWidget):
 ##T²/Q plot
     def init_attr_values(self):
 
-        #X = self.data
-        #n = self.ncomponents
-
+        normalizer = Normalize()
+        centerer = Center()
+        if self.testdata_box:
+            testlabelqt = self._testdata_transformed.Y + np.max(self.data.Y)+1
+            self.datalabelqt = np.hstack((self.data.Y, testlabelqt))
+            data = np.vstack((self.data.X, self.testdata.X))
+        else:
+            self.datalabelqt = self.data.Y
+            data = self.data.X
         if self.standardize == True and self.centering == False:
-            X_preprocessed = Normalize()(self.data.X)
+            X_preprocessed = normalizer.fit_transform(data)
             XArray = np.copy(X_preprocessed)
         elif self.centering == True and self.standardize == False:
-            X_preprocessed = self.data.X
+            X_preprocessed = centerer.fit_transform(data)
             XArray = np.copy(X_preprocessed)
 
         else:
@@ -1012,7 +1046,13 @@ class OWPCA(widget.OWWidget):
         P = pca.components_[:self.ncomponents, :]
         X_pred = np.dot(T, P) + pca.mean_
 
-        Err = XArray - X_pred
+        if self.standardize == True and self.centering == False:
+            X_predIT = normalizer.inverse_transform(X_pred)
+        elif self.centering == True and self.standardize == False:
+            X_predIT = centerer.inverse_transform(X_pred)
+
+        Err = data-X_predIT
+        #Err = XArray - X_pred
         Q = np.sum(Err ** 2, axis=1)
         Q = Q.reshape((len(Q),1))
 
@@ -1057,8 +1097,13 @@ class OWPCA(widget.OWWidget):
 
         x=self._statistics.X[:,self.domainIndexes[str(self.attr_x)]]
         y=self._statistics.X[:,self.domainIndexes[str(self.attr_y)]]
-
         y = y/y.max()
+        #x = x/x.max()
+        classes = self.train_classes.copy()
+        if self.testdata is not None:
+            if self.testdata_box is True:
+                for kk in range(0,len(np.unique(self._testdata_transformed.Y))):
+                    classes[len(self.train_classes)+kk] = f'predicted {self.train_classes[kk]}'
 
         # set the confidence level
         conf = self.Clvl[self.confidence]/100
@@ -1074,8 +1119,22 @@ class OWPCA(widget.OWWidget):
             if i == 0:
                 break
         Q_conf = Qsorted[i]
-
         data = self.data[:]
+        if self.testdata:
+            if self.testdata_box:
+                data.X = np.vstack((self.data.X, self.testdata.X))
+                data.W = np.vstack((self.data.W, self.testdata.W))
+                data.Y = np.hstack((self.data.Y, self.testdata.Y))
+                data.ids = np.hstack((self.data.ids, self.testdata.ids))
+                data.metas = np.vstack((self.data.metas, self.testdata.metas))
+            #else:
+                #data = self.data[:]
+        #else:
+            #data = self.data[:]
+
+
+
+
         outlier_index_Q = y > Q_conf
         outlier_index_T = x > Tsq_conf
         outlier_index = outlier_index_Q + outlier_index_T
@@ -1103,19 +1162,19 @@ class OWPCA(widget.OWWidget):
 
                 self.PlotStyle = [
                     dict(pen=None, symbolBrush=self.SYMBOLBRUSH[i], symbolPen=self.SYMBOLPEN[i], symbol='o', symbolSize=10,
-                        name=self.train_classes[i]) for i in range(len(self.train_classes))]
+                        name=classes[i]) for i in range(len(classes))]
 
-                self.plotThree.update(x,y, Style=self.PlotStyle, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box, tucl=Tsq_conf, qucl=Q_conf)
+                self.plotThree.update(x,y, Style=self.PlotStyle, labels=self.datalabelqt, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box, tucl=Tsq_conf, qucl=Q_conf)
             else:
 
                 self.Style = [
                     dict(pen=None, symbolBrush=self.SYMBOLBRUSH[0], symbolPen=self.SYMBOLPEN[0], symbol='o', symbolSize=10,
-                        name=self.train_classes[i]) for i in range(len(self.train_classes))]
-                self.plotThree.update(x, y, Style=self.Style, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box, tucl=Tsq_conf, qucl=Q_conf)
+                        name=classes[i]) for i in range(len(classes))]
+                self.plotThree.update(x, y, Style=self.Style, labels=self.datalabelqt, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box, tucl=Tsq_conf, qucl=Q_conf)
         else:
 
             self.Style = None
-            self.plotThree.update(x, y, Style=self.Style, labels=self.train_datalabel, x_axis_label=x_axis,
+            self.plotThree.update(x, y, Style=self.Style, labels=self.datalabelqt, x_axis_label=x_axis,
                                   y_axis_label=y_axis, legend=self.legend_box, tucl=Tsq_conf, qucl=Q_conf)
         self.unconditional_commit()
 
@@ -1124,6 +1183,7 @@ class OWPCA(widget.OWWidget):
         self._setup_plotThree(self.attr_x, self.attr_y)
         self.scoreplot.clear_plot()
         self._setup_score_plot(self.score_x, self.score_y)
+
     def _update_legend_box(self):
         self.plotThree.clear_plot()
         self._setup_plotThree(self.attr_x, self.attr_y)
@@ -1136,15 +1196,19 @@ class OWPCA(widget.OWWidget):
 
     def plot_spin_selection(self):
         self._remove_spin_selection()
-        loadings = self.loadings[self.valid_loadings, self.graph_variables]
-        #, self.graph_variables
-        data = loadings[self.Principal_Component-1, :]
+        loadings = self.loadings[self.valid_loadings]
+        #, self.graph_variables]
+        if self.Principal_Component > loadings.X.shape[0]:
+            data = loadings[len(self.valid_loadings) - 1, :]
+            self.Error.loading_not_available()
+        else:
+            data = loadings[self.Principal_Component-1, :]
         self._plot_spin_sel(data, np.where(self.valid_loadings)[0])
         self.loadingsplot.view_box.add_profiles(data.X)
 
     def _update_plot_spin_selection(self, component):
         self._remove_spin_selection()
-        loadings = self.loadings[self.valid_loadings, self.graph_variables]
+        loadings = self.loadings[self.valid_loadings]
         if len(self.valid_loadings) < (component):
             data = loadings[len(self.valid_loadings)-1, :]
             self.Error.loading_not_available()
@@ -1226,7 +1290,6 @@ class OWPCA(widget.OWWidget):
         self.info.set_input_summary(summary, details)
 
 ##Score plot
-
     def set_attr_from_combo(self):
         self.score_changed()
         self.xy_changed_manually.emit(self.score_x, self.score_y)
@@ -1241,28 +1304,36 @@ class OWPCA(widget.OWWidget):
         if self._pca is None:
             self.scoreplot.clear_plot()
             return
-
-
         x=self._Transformed.X[:,self.domainIndexesScore[str(self.score_x)]]
         y=self._Transformed.X[:,self.domainIndexesScore[str(self.score_y)]]
+        classes = self.train_classes.copy()
+        if self.testdata is not None:
+            if self.testdata_box is True:
+                for kk in range(0,len(np.unique(self._testdata_transformed.Y))):
+                    classes[len(self.train_classes)+kk] = f'predicted {self.train_classes[kk]}'
 
         if self.class_box:
 
             self.PlotStyle = [
                 dict(pen=None, symbolBrush=self.SYMBOLBRUSH[i], symbolPen=self.SYMBOLPEN[i], symbol='o', symbolSize=10,
-                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
+                    name=classes[i]) for i in range(len(classes))]
 
-            self.scoreplot.update(x,y, Style=self.PlotStyle, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box)
+            self.scoreplot.update(x,y, Style=self.PlotStyle, labels=self.datalabel, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box)
         else:
 
             self.Style = [
                 dict(pen=None, symbolBrush=self.SYMBOLBRUSH[0], symbolPen=self.SYMBOLPEN[0], symbol='o', symbolSize=10,
-                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
-            self.scoreplot.update(x, y, Style=self.Style, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box)
+                    name=classes[i]) for i in range(len(classes))]
+            self.scoreplot.update(x, y, Style=self.Style, labels=self.datalabel, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box)
 
     def init_score_values(self):
-
-        datatrans = self._transformed.X
+        if self.testdata_box:
+            testlabel = self._testdata_transformed.Y + np.max(self.data.Y) + 1
+            self.datalabel = np.hstack((self.data.Y, testlabel))
+            datatrans = np.vstack((self._transformed.X, self._testdata_transformed.X))
+        else:
+            self.datalabel = self.data.Y
+            datatrans = self._transformed.X
         domain = np.array(['PC {}'.format(i + 1)
                               for i in range(datatrans.shape[1])],
                             dtype=object)
@@ -1280,7 +1351,7 @@ class OWPCA(widget.OWWidget):
         self.xy_modelScore.set_domain(dom)
         self.score_x = self.xy_modelScore[0] if self.xy_modelScore else None
         self.score_y = self.xy_modelScore[1] if len(self.xy_modelScore) >= 2 \
-            else self.attr_x
+            else self.score_x
 
 ##All plots
     def _update_standardize(self):
@@ -1291,6 +1362,8 @@ class OWPCA(widget.OWWidget):
         if self.standardize is False:
             self.centering = True
         self.fit()
+        if self.testdata:
+            self._testdata_transformed = self.testdata_transform(self.testdata, self._pca)
         if self.data is None:
             self._invalidate_selection()
         else:
@@ -1307,6 +1380,8 @@ class OWPCA(widget.OWWidget):
         if self.centering is False:
             self.standardize = True
         self.fit()
+        if self.testdata:
+            self._testdata_transformed = self.testdata_transform(self.testdata, self._pca)
         if self.data is None:
             self._invalidate_selection()
         else:
@@ -1314,12 +1389,24 @@ class OWPCA(widget.OWWidget):
             self._setup_plotThree(self.attr_x, self.attr_y)
             self.init_score_values()
             self._setup_score_plot(self.score_x, self.score_y)
+            self.commit()
+
+    def _update_testdata_box(self):
+        if self.testdata is None:
+            self.testdata_box = False
+        else:
+            self.init_attr_values()
+            self._setup_plotThree(self.attr_x, self.attr_y)
+            self.init_score_values()
+            self._setup_score_plot(self.score_x, self.score_y)
+            self.commit()
+
 
 if __name__ == "__main__":
     from sklearn.model_selection import KFold
     data = Table("iris")
     #data = Table("brown-selected")
-    KF = KFold(n_splits=2, shuffle=False, random_state=None)
+    KF = KFold(n_splits=2, shuffle=True, random_state=None)
     KF.get_n_splits(data)
     train_index, test_index = KF.split(data)
     X_train, X_test = data[train_index[0]], data[test_index[0]]

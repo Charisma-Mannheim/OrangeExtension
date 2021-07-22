@@ -39,9 +39,7 @@ orangecontrib/extension/widgets/OWPCALDA.py
 orangecontrib/extension/widgets/OWPLSRegression.py
 orangecontrib/extension/widgets/OWcorrMat.py
 orangecontrib/extension/widgets/OWlineplot.py
-orangecontrib/extension/widgets/OWpcaAKWeller.py
-orangecontrib/extension/widgets/OWpcaAKWellerScatter.py
+orangecontrib/extension/widgets/OWpcaAKWellerTestData.py
 orangecontrib/extension/widgets/OWscatterplotAKWeller.py
 orangecontrib/extension/widgets/OWtestandscoreAKWeller.py
 orangecontrib/extension/widgets/__init__.py
-orangecontrib/extension/widgets/test.py
