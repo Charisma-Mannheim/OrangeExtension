@@ -44,7 +44,7 @@ from Orange.widgets.utils.sql import check_sql_input
 from Orange.widgets.utils.state_summary import format_summary_details
 from Orange.widgets.visualize.owdistributions import LegendItem
 from Orange.widgets.widget import OWWidget, Input, Output, Msg
-
+from Orange.widgets.visualize.utils.widget import OWDataProjectionWidget
 
 from orangecontrib.extension.utils import scattergraph
 

@@ -127,8 +127,6 @@ class ScatterGraph(ScatterGraphWidget, GraphicsWidget):
     def __init__(self, callback):
         super().__init__()
 
-
-
         self.plot.plotItem.getViewBox().setMenuEnabled(False)
         self.plot.plotItem.getViewBox().setMouseEnabled(False, False)
         self.plot.plotItem.showGrid(True, True, alpha=0.5)
@@ -136,7 +134,7 @@ class ScatterGraph(ScatterGraphWidget, GraphicsWidget):
 
         self.callback = callback
         self.sequences = None
-        #self.selection = set()
+        self.selection = set()
         self._linet = None
         self._lineq = None
         self.x = None
@@ -230,8 +228,6 @@ class ScatterGraph(ScatterGraphWidget, GraphicsWidget):
         self._linet.setPen(mkPen(QColor(Qt.blue), style=Qt.DashLine, width=1))
         self.plot.addItem(self._linet)
 
-
-
     def _plot_cutpointQ(self, x):
 
         self._lineq = None
@@ -244,7 +240,6 @@ class ScatterGraph(ScatterGraphWidget, GraphicsWidget):
         )
         self._lineq.setPen(mkPen(QColor(Qt.blue), style=Qt.DashLine, width=1))
         self.plot.addItem(self._lineq)
-
 
     def set_cut_pointT(self, x):
         """

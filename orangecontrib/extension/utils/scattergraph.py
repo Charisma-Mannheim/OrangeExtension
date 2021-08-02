@@ -32,7 +32,6 @@ class ScatterGraphWidget(QtGui.QSplitter):
         self.scatterPlot = None
         self.style = dict(pen=None, symbol='o', symbolPen=(0,0,200), symbolSize=10,symbolBrush=(0,65,200), name="data")
 
-
     def updatePlot(self):
         self.plot.clear()
         if self.data is None:
@@ -126,9 +125,6 @@ class ScatterGraphWidget(QtGui.QSplitter):
 class ScatterGraph(ScatterGraphWidget, GraphicsWidget):
     def __init__(self, callback):
         super().__init__()
-
-
-
         self.plot.plotItem.getViewBox().setMenuEnabled(False)
         self.plot.plotItem.getViewBox().setMouseEnabled(False, False)
         self.plot.plotItem.showGrid(True, True, alpha=0.5)
