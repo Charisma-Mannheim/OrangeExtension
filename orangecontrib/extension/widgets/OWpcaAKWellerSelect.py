@@ -255,7 +255,7 @@ class OWPCA(widget.OWWidget):
     name = "PCA"
     description = "Principal component analysis with a diagram of the root mean square error of reconstruction and prediction as well as \
     a scree plot of explained variance."
-    icon = "icons/PCA.svg"
+    icon = "icons/NoIcon.svg"
     priority = 1
     keywords = ["principal component analysis", "linear transformation"]
 

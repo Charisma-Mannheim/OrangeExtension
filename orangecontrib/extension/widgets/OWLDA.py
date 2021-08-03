@@ -255,11 +255,603 @@ class OWLDA(widget.OWWidget):
         tab = createTabPage(tabs, "Confusion matrix")
         tab.layout().addWidget(boxConfus)
 
+
+    #Scatter plot
+    def set_attr_from_combo(self):
+        self.attr_changed()
+        self.xy_changed_manually.emit(self.attr_x, self.attr_y)
+
+    def attr_changed(self):
+        self._setup_plot(self.attr_x, self.attr_y)
+        self.commit()
+
+    def _update_class_box(self):
+        self.plot.clear_plot()
+        self._setup_plot(self.attr_x, self.attr_y)
+
+    def _update_legend_box(self):
+        self.plot.clear_plot()
+        self._setup_plot(self.attr_x, self.attr_y)
+
+    def _setup_plot(self, x_axis, y_axis):
+
+        self.plot.clear_plot()
+        if self._lda is None:
+            self.plot.clear_plot()
+            return
+
+
+        x=self._transformed.X[:,self.domainIndexes[str(self.attr_x)]]
+        y=self._transformed.X[:,self.domainIndexes[str(self.attr_y)]]
+
+        if self.class_box:
+
+            self.PlotStyle = [
+                dict(pen=None, symbolBrush=self.SYMBOLBRUSH[i], symbolPen=self.SYMBOLPEN[i], symbol='o', symbolSize=10,
+                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
+
+            self.plot.update(x,y, Style=self.PlotStyle, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box)
+        else:
+
+            self.Style = [
+                dict(pen=None, symbolBrush=self.SYMBOLBRUSH[0], symbolPen=self.SYMBOLPEN[0], symbol='o', symbolSize=10,
+                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
+            self.plot.update(x, y, Style=self.Style, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box)
+
+    def init_attr_values(self):
+
+        datatrans = self._transformed
+        domain = numpy.array(['DF{}'.format(i + 1)
+                              for i in range(datatrans.shape[1])],
+                            dtype=object)
+
+        for i in range(len(domain)):
+            self.domainIndexes[domain[i]] = i
+
+        proposed = [a for a in domain]
+
+        dom = Domain(
+            [ContinuousVariable(name, compute_value=lambda _: None)
+             for name in proposed],
+            metas=None)
+        self._transformed = Table(dom, datatrans, metas=None)
+        self.xy_model.set_domain(dom)
+        self.attr_x = self.xy_model[0] if self.xy_model else None
+        self.attr_y = self.xy_model[1] if len(self.xy_model) >= 2 \
+            else self.attr_x
+    #Confusion matrix
+    def _param_changed(self):
+
+        self._update_ConfMat()
+
+    def _update_ConfMat(self):
+        def _isinvalid(x):
+            return isnan(x) or isinf(x)
+        if self.resampling == self.TestOnTrain:
+
+            if self.train_pred is not None:
+                cmatrix = confusion_matrix(self.train_data, self.train_pred)
+                colsum = cmatrix.sum(axis=0)
+                rowsum = cmatrix.sum(axis=1)
+                n = len(cmatrix)
+                diag = np.diag_indices(n)
+
+                colors = cmatrix.astype(np.double)
+                colors[diag] = 0
+                if self.selected_quantity == 0:
+                    normalized = cmatrix.astype(int)
+                    formatstr = "{}"
+                    div = np.array([colors.max()])
+                else:
+                    if self.selected_quantity == 1:
+                        normalized = 100 * cmatrix / colsum
+                        div = colors.max(axis=0)
+                    else:
+                        normalized = 100 * cmatrix / rowsum[:, np.newaxis]
+                        div = colors.max(axis=1)[:, np.newaxis]
+                    formatstr = "{:2.1f} %"
+                div[div == 0] = 1
+                colors /= div
+                maxval = normalized[diag].max()
+                if maxval > 0:
+                    colors[diag] = normalized[diag] / maxval
+
+                for i in range(n):
+                    for j in range(n):
+                        val = normalized[i, j]
+                        col_val = colors[i, j]
+                        item = self._item(i + 2, j + 2)
+                        item.setData(
+                            "NA" if _isinvalid(val) else formatstr.format(val),
+                            Qt.DisplayRole)
+                        bkcolor = QColor.fromHsl(
+                            [0, 240][i == j], 160,
+                            255 if _isinvalid(col_val) else int(255 - 30 * col_val))
+                        item.setData(QBrush(bkcolor), Qt.BackgroundRole)
+                        item.setData("trbl", BorderRole)
+                        item.setToolTip("actual: {}\npredicted: {}".format(
+                            self.train_headers[i], self.train_headers[j]))
+                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                        self._set_item(i + 2, j + 2, item)
+
+                bold_font = self.tablemodel.invisibleRootItem().font()
+                bold_font.setBold(True)
+
+                def _sum_item(value, border=""):
+                    item = QStandardItem()
+                    item.setData(value, Qt.DisplayRole)
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    item.setFlags(Qt.ItemIsEnabled)
+                    item.setFont(bold_font)
+                    item.setData(border, BorderRole)
+                    item.setData(QColor(192, 192, 192), BorderColorRole)
+                    return item
+
+                for i in range(n):
+                    self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
+                    self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
+                self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
+        elif self.resampling == self.TestOnTest:
+
+            if self.test_pred is not None and self.test_data is not None:
+
+                cmatrix = confusion_matrix(self.test_data, self.test_pred)
+                colsum = cmatrix.sum(axis=0)
+                rowsum = cmatrix.sum(axis=1)
+                n = len(cmatrix)
+                diag = np.diag_indices(n)
+
+                colors = cmatrix.astype(np.double)
+                colors[diag] = 0
+                if self.selected_quantity == 0:
+                    normalized = cmatrix.astype(int)
+                    formatstr = "{}"
+                    div = np.array([colors.max()])
+                else:
+                    if self.selected_quantity == 1:
+                        normalized = 100 * cmatrix / colsum
+                        div = colors.max(axis=0)
+                    else:
+                        normalized = 100 * cmatrix / rowsum[:, np.newaxis]
+                        div = colors.max(axis=1)[:, np.newaxis]
+                    formatstr = "{:2.1f} %"
+                div[div == 0] = 1
+                colors /= div
+                maxval = normalized[diag].max()
+                if maxval > 0:
+                    colors[diag] = normalized[diag] / maxval
+
+                for i in range(n):
+                    for j in range(n):
+                        val = normalized[i, j]
+                        col_val = colors[i, j]
+                        item = self._item(i + 2, j + 2)
+                        item.setData(
+                            "NA" if _isinvalid(val) else formatstr.format(val),
+                            Qt.DisplayRole)
+                        bkcolor = QColor.fromHsl(
+                            [0, 240][i == j], 160,
+                            255 if _isinvalid(col_val) else int(255 - 30 * col_val))
+                        item.setData(QBrush(bkcolor), Qt.BackgroundRole)
+                        item.setData("trbl", BorderRole)
+                        item.setToolTip("actual: {}\npredicted: {}".format(
+                            self.train_headers[i], self.train_headers[j]))
+                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                        self._set_item(i + 2, j + 2, item)
+
+                bold_font = self.tablemodel.invisibleRootItem().font()
+                bold_font.setBold(True)
+
+                def _sum_item(value, border=""):
+                    item = QStandardItem()
+                    item.setData(value, Qt.DisplayRole)
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    item.setFlags(Qt.ItemIsEnabled)
+                    item.setFont(bold_font)
+                    item.setData(border, BorderRole)
+                    item.setData(QColor(192, 192, 192), BorderColorRole)
+                    return item
+
+                for i in range(n):
+                    self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
+                    self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
+                self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
+            else:
+                return
+        elif self.resampling == self.KFold:
+            LDA = lda(solver="svd", shrinkage=None, priors=None,
+            n_components=min(self.train_data.X.shape[1], len(self.classes)-1), store_covariance=False, tol=1e-4)
+            kf = KFold(n_splits=self.NFolds[self.n_folds], shuffle=True, random_state=42)
+            precmatrix = []
+            for i in range(self.NFolds[self.n_folds]):
+                precmatrix.append(numpy.zeros(shape=(len(self.train_data.domain.class_var.values),len(self.train_data.domain.class_var.values))))
+            zaehler = 0
+            pb = gui.ProgressBar(self, self.NFolds[self.n_folds])
+
+            for train_index, test_index in kf.split(self.train_data):
+
+                train, test = self.train_data[train_index], self.train_data[test_index]
+                LDA.fit(train.X, train.Y)
+                Y_test_pred = LDA.predict(test.X)
+                if zaehler == 0:
+                    precmatrix[zaehler] = confusion_matrix(test, Y_test_pred)
+                else:
+                    precmatrix[zaehler] = precmatrix[zaehler-1] + confusion_matrix(test, Y_test_pred)
+                zaehler = zaehler +1
+                pb.advance()
+
+            pb.finish()
+
+            cmatrix = precmatrix[len(precmatrix)-1]
+
+            colsum = cmatrix.sum(axis=0)
+            rowsum = cmatrix.sum(axis=1)
+            n = len(cmatrix)
+            diag = np.diag_indices(n)
+
+            colors = cmatrix.astype(np.double)
+            colors[diag] = 0
+            if self.selected_quantity == 0:
+                normalized = cmatrix.astype(int)
+                formatstr = "{}"
+                div = np.array([colors.max()])
+            else:
+                if self.selected_quantity == 1:
+                    normalized = 100 * cmatrix / colsum
+                    div = colors.max(axis=0)
+                else:
+                    normalized = 100 * cmatrix / rowsum[:, np.newaxis]
+                    div = colors.max(axis=1)[:, np.newaxis]
+                formatstr = "{:2.1f} %"
+            div[div == 0] = 1
+            colors /= div
+            maxval = normalized[diag].max()
+            if maxval > 0:
+                colors[diag] = normalized[diag] / maxval
+
+            for i in range(n):
+                for j in range(n):
+                    val = normalized[i, j]
+                    col_val = colors[i, j]
+                    item = self._item(i + 2, j + 2)
+                    item.setData(
+                        "NA" if _isinvalid(val) else formatstr.format(val),
+                        Qt.DisplayRole)
+                    bkcolor = QColor.fromHsl(
+                        [0, 240][i == j], 160,
+                        255 if _isinvalid(col_val) else int(255 - 30 * col_val))
+                    item.setData(QBrush(bkcolor), Qt.BackgroundRole)
+                    item.setData("trbl", BorderRole)
+                    item.setToolTip("actual: {}\npredicted: {}".format(
+                        self.train_headers[i], self.train_headers[j]))
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self._set_item(i + 2, j + 2, item)
+
+            bold_font = self.tablemodel.invisibleRootItem().font()
+            bold_font.setBold(True)
+
+            def _sum_item(value, border=""):
+                item = QStandardItem()
+                item.setData(value, Qt.DisplayRole)
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                item.setFlags(Qt.ItemIsEnabled)
+                item.setFont(bold_font)
+                item.setData(border, BorderRole)
+                item.setData(QColor(192, 192, 192), BorderColorRole)
+                return item
+
+            for i in range(n):
+                self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
+                self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
+            self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
+        elif self.resampling == self.StratifiedKFold:
+
+            kf = StratifiedKFold(n_splits=self.sNFolds[self.sn_folds], shuffle=True, random_state=42)
+            precmatrix = []
+            LDA = lda(solver="svd", shrinkage=None, priors=None,
+            n_components=min(self.train_data.X.shape[1], len(self.classes)-1), store_covariance=False, tol=1e-4)
+            for i in range(self.sNFolds[self.sn_folds]):
+                precmatrix.append(numpy.zeros(shape=(len(self.train_data.domain.class_var.values),len(self.train_data.domain.class_var.values))))
+            zaehler = 0
+            pb = gui.ProgressBar(self, self.NFolds[self.n_folds])
+
+            for train_index, test_index in kf.split(self.train_data, self.train_data.Y):
+
+                train, test = self.train_data[train_index], self.train_data[test_index]
+                LDA.fit(train.X, train.Y)
+                Y_test_pred = LDA.predict(test.X)
+                if zaehler == 0:
+                    precmatrix[zaehler] = confusion_matrix(test, Y_test_pred)
+                else:
+                    precmatrix[zaehler] = precmatrix[zaehler-1] + confusion_matrix(test, Y_test_pred)
+                zaehler = zaehler +1
+                pb.advance()
+
+            pb.finish()
+
+            cmatrix = precmatrix[len(precmatrix)-1]
+            colsum = cmatrix.sum(axis=0)
+            rowsum = cmatrix.sum(axis=1)
+            n = len(cmatrix)
+            diag = np.diag_indices(n)
+
+            colors = cmatrix.astype(np.double)
+            colors[diag] = 0
+            if self.selected_quantity == 0:
+                normalized = cmatrix.astype(int)
+                formatstr = "{}"
+                div = np.array([colors.max()])
+            else:
+                if self.selected_quantity == 1:
+                    normalized = 100 * cmatrix / colsum
+                    div = colors.max(axis=0)
+                else:
+                    normalized = 100 * cmatrix / rowsum[:, np.newaxis]
+                    div = colors.max(axis=1)[:, np.newaxis]
+                formatstr = "{:2.1f} %"
+            div[div == 0] = 1
+            colors /= div
+            maxval = normalized[diag].max()
+            if maxval > 0:
+                colors[diag] = normalized[diag] / maxval
+
+            for i in range(n):
+                for j in range(n):
+                    val = normalized[i, j]
+                    col_val = colors[i, j]
+                    item = self._item(i + 2, j + 2)
+                    item.setData(
+                        "NA" if _isinvalid(val) else formatstr.format(val),
+                        Qt.DisplayRole)
+                    bkcolor = QColor.fromHsl(
+                        [0, 240][i == j], 160,
+                        255 if _isinvalid(col_val) else int(255 - 30 * col_val))
+                    item.setData(QBrush(bkcolor), Qt.BackgroundRole)
+                    item.setData("trbl", BorderRole)
+                    item.setToolTip("actual: {}\npredicted: {}".format(
+                        self.train_headers[i], self.train_headers[j]))
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self._set_item(i + 2, j + 2, item)
+
+            bold_font = self.tablemodel.invisibleRootItem().font()
+            bold_font.setBold(True)
+
+            def _sum_item(value, border=""):
+                item = QStandardItem()
+                item.setData(value, Qt.DisplayRole)
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                item.setFlags(Qt.ItemIsEnabled)
+                item.setFont(bold_font)
+                item.setData(border, BorderRole)
+                item.setData(QColor(192, 192, 192), BorderColorRole)
+                return item
+
+            for i in range(n):
+                self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
+                self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
+            self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
+        elif self.resampling == self.LeaveOneOut:
+            LDA = lda(solver="svd", shrinkage=None, priors=None,
+            n_components=min(self.train_data.X.shape[1], len(self.classes)-1), store_covariance=False, tol=1e-4)
+            kf = KFold(n_splits=self.train_data.Y.size, shuffle=True, random_state=42)
+            precmatrix = []
+            for i in range(self.train_data.Y.size):
+                precmatrix.append(numpy.zeros(shape=(len(self.train_data.domain.class_var.values),len(self.train_data.domain.class_var.values))))
+            zaehler = 0
+            pb = gui.ProgressBar(self, self.NFolds[self.n_folds])
+
+            for train_index, test_index in kf.split(self.train_data):
+
+                train, test = self.train_data[train_index], self.train_data[test_index]
+                LDA.fit(train.X, train.Y)
+                Y_test_pred = LDA.predict(test.X)
+                if zaehler == 0:
+                    precmatrix[zaehler] = confusion_matrix(test, Y_test_pred)
+                else:
+                    precmatrix[zaehler] = precmatrix[zaehler-1] + confusion_matrix(test, Y_test_pred)
+                zaehler = zaehler +1
+                pb.advance()
+
+            pb.finish()
+
+            cmatrix = precmatrix[len(precmatrix)-1]
+            colsum = cmatrix.sum(axis=0)
+            rowsum = cmatrix.sum(axis=1)
+            n = len(cmatrix)
+            diag = np.diag_indices(n)
+
+            colors = cmatrix.astype(np.double)
+            colors[diag] = 0
+            if self.selected_quantity == 0:
+                normalized = cmatrix.astype(int)
+                formatstr = "{}"
+                div = np.array([colors.max()])
+            else:
+                if self.selected_quantity == 1:
+                    normalized = 100 * cmatrix / colsum
+                    div = colors.max(axis=0)
+                else:
+                    normalized = 100 * cmatrix / rowsum[:, np.newaxis]
+                    div = colors.max(axis=1)[:, np.newaxis]
+                formatstr = "{:2.1f} %"
+            div[div == 0] = 1
+            colors /= div
+            maxval = normalized[diag].max()
+            if maxval > 0:
+                colors[diag] = normalized[diag] / maxval
+
+            for i in range(n):
+                for j in range(n):
+                    val = normalized[i, j]
+                    col_val = colors[i, j]
+                    item = self._item(i + 2, j + 2)
+                    item.setData(
+                        "NA" if _isinvalid(val) else formatstr.format(val),
+                        Qt.DisplayRole)
+                    bkcolor = QColor.fromHsl(
+                        [0, 240][i == j], 160,
+                        255 if _isinvalid(col_val) else int(255 - 30 * col_val))
+                    item.setData(QBrush(bkcolor), Qt.BackgroundRole)
+                    item.setData("trbl", BorderRole)
+                    item.setToolTip("actual: {}\npredicted: {}".format(
+                        self.train_headers[i], self.train_headers[j]))
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self._set_item(i + 2, j + 2, item)
+
+            bold_font = self.tablemodel.invisibleRootItem().font()
+            bold_font.setBold(True)
+
+            def _sum_item(value, border=""):
+                item = QStandardItem()
+                item.setData(value, Qt.DisplayRole)
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                item.setFlags(Qt.ItemIsEnabled)
+                item.setFont(bold_font)
+                item.setData(border, BorderRole)
+                item.setData(QColor(192, 192, 192), BorderColorRole)
+                return item
+
+            for i in range(n):
+                self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
+                self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
+            self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
+            pass
+        else:
+            return
+
+    def kfold_changed(self):
+        self.resampling = OWLDA.KFold
+        self._param_changed()
+
+    def skfold_changed(self):
+        self.resampling = OWLDA.StratifiedKFold
+        self._param_changed()
+
+    def _set_item(self, i, j, item):
+        self.tablemodel.setItem(i, j, item)
+
+    def _item(self, i, j):
+        return self.tablemodel.item(i, j) or QStandardItem()
+
+    def _init_table(self, nclasses):
+        item = self._item(0, 2)
+        item.setData("Predicted", Qt.DisplayRole)
+        item.setTextAlignment(Qt.AlignCenter)
+        item.setFlags(Qt.NoItemFlags)
+
+        self._set_item(0, 2, item)
+        item = self._item(2, 0)
+        item.setData("Actual", Qt.DisplayRole)
+        item.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
+        item.setFlags(Qt.NoItemFlags)
+        self.tableview.setItemDelegateForColumn(0, gui.VerticalItemDelegate())
+        self._set_item(2, 0, item)
+        self.tableview.setSpan(0, 2, 1, nclasses)
+        self.tableview.setSpan(2, 0, nclasses, 1)
+
+        font = self.tablemodel.invisibleRootItem().font()
+        bold_font = QFont(font)
+        bold_font.setBold(True)
+
+        for i in (0, 1):
+            for j in (0, 1):
+                item = self._item(i, j)
+                item.setFlags(Qt.NoItemFlags)
+                self._set_item(i, j, item)
+
+        for p, label in enumerate(self.train_headers):
+            for i, j in ((1, p + 2), (p + 2, 1)):
+                item = self._item(i, j)
+                item.setData(label, Qt.DisplayRole)
+                item.setFont(bold_font)
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                item.setFlags(Qt.ItemIsEnabled)
+                if p < len(self.train_headers) - 1:
+                    item.setData("br"[j == 1], BorderRole)
+                    item.setData(QColor(192, 192, 192), BorderColorRole)
+                self._set_item(i, j, item)
+
+        hor_header = self.tableview.horizontalHeader()
+        if len(' '.join(self.train_headers)) < 120:
+            hor_header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        else:
+            hor_header.setDefaultSectionSize(110)
+        self.tablemodel.setRowCount(nclasses + 3)
+        self.tablemodel.setColumnCount(nclasses + 3)
+
+#widget properties
     @staticmethod
     def sizeHint():
         """Initial size"""
         return QSize(933, 600)
 
+    def _prepare_data(self):
+
+        indices = self.tableview.selectedIndexes()
+        indices = {(ind.row() - 2, ind.column() - 2) for ind in indices}
+        actual = self.train_data.Y
+        predicted = self.train_pred
+        selected = [i for i, t in enumerate(zip(actual, predicted))
+                    if t in indices]
+
+        extra = []
+        class_var = self.train_data.domain.class_var
+        metas = self.train_data.domain.metas
+        attrs = self.train_data.domain.attributes
+        names = [var.name for var in chain(metas, [class_var], attrs)]
+        domain = Orange.data.Domain(self.train_data.domain.attributes,
+                                    self.train_data.domain.class_vars,
+                                    metas)
+        data = self.train_data.transform(domain)
+        if extra:
+            data.metas[:, len(self.train_data.domain.metas):] = \
+                np.hstack(tuple(extra))
+        data.name = learner_name
+
+        if selected:
+            annotated_data = create_annotated_table(data, selected)
+            data = data[selected]
+        else:
+            annotated_data = create_annotated_table(data, [])
+            data = None
+
+        return data, annotated_data
+
+    def commit(self):
+
+        self.send_features()
+        """Output data instances corresponding to selected cells"""
+        if self.train_pred is not None and self.train_data is not None:
+            data, annotated_data = self._prepare_data()
+        else:
+            data = None
+            annotated_data = None
+
+        summary = len(data) if data else self.info.NoOutput
+        details = format_summary_details(data) if data else ""
+        self.info.set_output_summary(summary, details)
+
+        #self.Outputs.selected_data.send(data)
+        #self.Outputs.annotated_data.send(annotated_data)
+
+    def send_features(self):
+        features = [attr for attr in [self.attr_x, self.attr_y] if attr]
+        #self.Outputs.features.send(features or None)
+
+    def send_report(self):
+
+        """Send report"""
+        if self.train_data is None:
+            return
+        if self.train_pred is not None:
+            self.report_table("Confusion matrix", self.tableview)
+            self.report_plot("Score plot", self.plot)
+#Data handling
     @Inputs.train_data
     def set_train_data(self, data):
         #if data is None:
@@ -357,414 +949,6 @@ class OWLDA(widget.OWWidget):
             self._set_selection()
             self.unconditional_commit()
 
-    def _update_ConfMat(self):
-        def _isinvalid(x):
-            return isnan(x) or isinf(x)
-        if self.resampling == self.TestOnTrain:
-
-            if self.train_pred is not None:
-                cmatrix = confusion_matrix(self.train_data, self.train_pred)
-                colsum = cmatrix.sum(axis=0)
-                rowsum = cmatrix.sum(axis=1)
-                n = len(cmatrix)
-                diag = np.diag_indices(n)
-
-                colors = cmatrix.astype(np.double)
-                colors[diag] = 0
-                if self.selected_quantity == 0:
-                    normalized = cmatrix.astype(int)
-                    formatstr = "{}"
-                    div = np.array([colors.max()])
-                else:
-                    if self.selected_quantity == 1:
-                        normalized = 100 * cmatrix / colsum
-                        div = colors.max(axis=0)
-                    else:
-                        normalized = 100 * cmatrix / rowsum[:, np.newaxis]
-                        div = colors.max(axis=1)[:, np.newaxis]
-                    formatstr = "{:2.1f} %"
-                div[div == 0] = 1
-                colors /= div
-                maxval = normalized[diag].max()
-                if maxval > 0:
-                    colors[diag] = normalized[diag] / maxval
-
-                for i in range(n):
-                    for j in range(n):
-                        val = normalized[i, j]
-                        col_val = colors[i, j]
-                        item = self._item(i + 2, j + 2)
-                        item.setData(
-                            "NA" if _isinvalid(val) else formatstr.format(val),
-                            Qt.DisplayRole)
-                        bkcolor = QColor.fromHsl(
-                            [0, 240][i == j], 160,
-                            255 if _isinvalid(col_val) else int(255 - 30 * col_val))
-                        item.setData(QBrush(bkcolor), Qt.BackgroundRole)
-                        item.setData("trbl", BorderRole)
-                        item.setToolTip("actual: {}\npredicted: {}".format(
-                            self.train_headers[i], self.train_headers[j]))
-                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                        self._set_item(i + 2, j + 2, item)
-
-                bold_font = self.tablemodel.invisibleRootItem().font()
-                bold_font.setBold(True)
-
-                def _sum_item(value, border=""):
-                    item = QStandardItem()
-                    item.setData(value, Qt.DisplayRole)
-                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    item.setFlags(Qt.ItemIsEnabled)
-                    item.setFont(bold_font)
-                    item.setData(border, BorderRole)
-                    item.setData(QColor(192, 192, 192), BorderColorRole)
-                    return item
-
-                for i in range(n):
-                    self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
-                    self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
-                self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
-        elif self.resampling == self.TestOnTest:
-
-            if self.test_pred is not None and self.test_data is not None:
-
-                cmatrix = confusion_matrix(self.test_data, self.test_pred)
-                colsum = cmatrix.sum(axis=0)
-                rowsum = cmatrix.sum(axis=1)
-                n = len(cmatrix)
-                diag = np.diag_indices(n)
-
-                colors = cmatrix.astype(np.double)
-                colors[diag] = 0
-                if self.selected_quantity == 0:
-                    normalized = cmatrix.astype(np.int)
-                    formatstr = "{}"
-                    div = np.array([colors.max()])
-                else:
-                    if self.selected_quantity == 1:
-                        normalized = 100 * cmatrix / colsum
-                        div = colors.max(axis=0)
-                    else:
-                        normalized = 100 * cmatrix / rowsum[:, np.newaxis]
-                        div = colors.max(axis=1)[:, np.newaxis]
-                    formatstr = "{:2.1f} %"
-                div[div == 0] = 1
-                colors /= div
-                maxval = normalized[diag].max()
-                if maxval > 0:
-                    colors[diag] = normalized[diag] / maxval
-
-                for i in range(n):
-                    for j in range(n):
-                        val = normalized[i, j]
-                        col_val = colors[i, j]
-                        item = self._item(i + 2, j + 2)
-                        item.setData(
-                            "NA" if _isinvalid(val) else formatstr.format(val),
-                            Qt.DisplayRole)
-                        bkcolor = QColor.fromHsl(
-                            [0, 240][i == j], 160,
-                            255 if _isinvalid(col_val) else int(255 - 30 * col_val))
-                        item.setData(QBrush(bkcolor), Qt.BackgroundRole)
-                        item.setData("trbl", BorderRole)
-                        item.setToolTip("actual: {}\npredicted: {}".format(
-                            self.train_headers[i], self.train_headers[j]))
-                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                        self._set_item(i + 2, j + 2, item)
-
-                bold_font = self.tablemodel.invisibleRootItem().font()
-                bold_font.setBold(True)
-
-                def _sum_item(value, border=""):
-                    item = QStandardItem()
-                    item.setData(value, Qt.DisplayRole)
-                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    item.setFlags(Qt.ItemIsEnabled)
-                    item.setFont(bold_font)
-                    item.setData(border, BorderRole)
-                    item.setData(QColor(192, 192, 192), BorderColorRole)
-                    return item
-
-                for i in range(n):
-                    self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
-                    self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
-                self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
-            else:
-                return
-        elif self.resampling == self.KFold:
-            LDA = lda(solver="svd", shrinkage=None, priors=None,
-            n_components=min(self.train_data.X.shape[1], len(self.classes)-1), store_covariance=False, tol=1e-4)
-            kf = KFold(n_splits=self.NFolds[self.n_folds], shuffle=True, random_state=42)
-            precmatrix = []
-            for i in range(self.NFolds[self.n_folds]):
-                precmatrix.append(numpy.zeros(shape=(len(self.train_data.domain.class_var.values),len(self.train_data.domain.class_var.values))))
-            zaehler = 0
-            pb = gui.ProgressBar(self, self.NFolds[self.n_folds])
-
-            for train_index, test_index in kf.split(self.train_data):
-
-                train, test = self.train_data[train_index], self.train_data[test_index]
-                LDA.fit(train.X, train.Y)
-                Y_test_pred = LDA.predict(test.X)
-                if zaehler == 0:
-                    precmatrix[zaehler] = confusion_matrix(test, Y_test_pred)
-                else:
-                    precmatrix[zaehler] = precmatrix[zaehler-1] + confusion_matrix(test, Y_test_pred)
-                zaehler = zaehler +1
-                pb.advance()
-
-            pb.finish()
-
-            cmatrix = precmatrix[len(precmatrix)-1]
-
-            colsum = cmatrix.sum(axis=0)
-            rowsum = cmatrix.sum(axis=1)
-            n = len(cmatrix)
-            diag = np.diag_indices(n)
-
-            colors = cmatrix.astype(np.double)
-            colors[diag] = 0
-            if self.selected_quantity == 0:
-                normalized = cmatrix.astype(np.int)
-                formatstr = "{}"
-                div = np.array([colors.max()])
-            else:
-                if self.selected_quantity == 1:
-                    normalized = 100 * cmatrix / colsum
-                    div = colors.max(axis=0)
-                else:
-                    normalized = 100 * cmatrix / rowsum[:, np.newaxis]
-                    div = colors.max(axis=1)[:, np.newaxis]
-                formatstr = "{:2.1f} %"
-            div[div == 0] = 1
-            colors /= div
-            maxval = normalized[diag].max()
-            if maxval > 0:
-                colors[diag] = normalized[diag] / maxval
-
-            for i in range(n):
-                for j in range(n):
-                    val = normalized[i, j]
-                    col_val = colors[i, j]
-                    item = self._item(i + 2, j + 2)
-                    item.setData(
-                        "NA" if _isinvalid(val) else formatstr.format(val),
-                        Qt.DisplayRole)
-                    bkcolor = QColor.fromHsl(
-                        [0, 240][i == j], 160,
-                        255 if _isinvalid(col_val) else int(255 - 30 * col_val))
-                    item.setData(QBrush(bkcolor), Qt.BackgroundRole)
-                    item.setData("trbl", BorderRole)
-                    item.setToolTip("actual: {}\npredicted: {}".format(
-                        self.train_headers[i], self.train_headers[j]))
-                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                    self._set_item(i + 2, j + 2, item)
-
-            bold_font = self.tablemodel.invisibleRootItem().font()
-            bold_font.setBold(True)
-
-            def _sum_item(value, border=""):
-                item = QStandardItem()
-                item.setData(value, Qt.DisplayRole)
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                item.setFlags(Qt.ItemIsEnabled)
-                item.setFont(bold_font)
-                item.setData(border, BorderRole)
-                item.setData(QColor(192, 192, 192), BorderColorRole)
-                return item
-
-            for i in range(n):
-                self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
-                self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
-            self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
-        elif self.resampling == self.StratifiedKFold:
-
-            kf = StratifiedKFold(n_splits=self.sNFolds[self.sn_folds], shuffle=True, random_state=42)
-            precmatrix = []
-            LDA = lda(solver="svd", shrinkage=None, priors=None,
-            n_components=min(self.train_data.X.shape[1], len(self.classes)-1), store_covariance=False, tol=1e-4)
-            for i in range(self.sNFolds[self.sn_folds]):
-                precmatrix.append(numpy.zeros(shape=(len(self.train_data.domain.class_var.values),len(self.train_data.domain.class_var.values))))
-            zaehler = 0
-            pb = gui.ProgressBar(self, self.NFolds[self.n_folds])
-
-            for train_index, test_index in kf.split(self.train_data, self.train_data.Y):
-
-                train, test = self.train_data[train_index], self.train_data[test_index]
-                LDA.fit(train.X, train.Y)
-                Y_test_pred = LDA.predict(test.X)
-                if zaehler == 0:
-                    precmatrix[zaehler] = confusion_matrix(test, Y_test_pred)
-                else:
-                    precmatrix[zaehler] = precmatrix[zaehler-1] + confusion_matrix(test, Y_test_pred)
-                zaehler = zaehler +1
-                pb.advance()
-
-            pb.finish()
-
-            cmatrix = precmatrix[len(precmatrix)-1]
-            colsum = cmatrix.sum(axis=0)
-            rowsum = cmatrix.sum(axis=1)
-            n = len(cmatrix)
-            diag = np.diag_indices(n)
-
-            colors = cmatrix.astype(np.double)
-            colors[diag] = 0
-            if self.selected_quantity == 0:
-                normalized = cmatrix.astype(np.int)
-                formatstr = "{}"
-                div = np.array([colors.max()])
-            else:
-                if self.selected_quantity == 1:
-                    normalized = 100 * cmatrix / colsum
-                    div = colors.max(axis=0)
-                else:
-                    normalized = 100 * cmatrix / rowsum[:, np.newaxis]
-                    div = colors.max(axis=1)[:, np.newaxis]
-                formatstr = "{:2.1f} %"
-            div[div == 0] = 1
-            colors /= div
-            maxval = normalized[diag].max()
-            if maxval > 0:
-                colors[diag] = normalized[diag] / maxval
-
-            for i in range(n):
-                for j in range(n):
-                    val = normalized[i, j]
-                    col_val = colors[i, j]
-                    item = self._item(i + 2, j + 2)
-                    item.setData(
-                        "NA" if _isinvalid(val) else formatstr.format(val),
-                        Qt.DisplayRole)
-                    bkcolor = QColor.fromHsl(
-                        [0, 240][i == j], 160,
-                        255 if _isinvalid(col_val) else int(255 - 30 * col_val))
-                    item.setData(QBrush(bkcolor), Qt.BackgroundRole)
-                    item.setData("trbl", BorderRole)
-                    item.setToolTip("actual: {}\npredicted: {}".format(
-                        self.train_headers[i], self.train_headers[j]))
-                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                    self._set_item(i + 2, j + 2, item)
-
-            bold_font = self.tablemodel.invisibleRootItem().font()
-            bold_font.setBold(True)
-
-            def _sum_item(value, border=""):
-                item = QStandardItem()
-                item.setData(value, Qt.DisplayRole)
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                item.setFlags(Qt.ItemIsEnabled)
-                item.setFont(bold_font)
-                item.setData(border, BorderRole)
-                item.setData(QColor(192, 192, 192), BorderColorRole)
-                return item
-
-            for i in range(n):
-                self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
-                self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
-            self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
-        elif self.resampling == self.LeaveOneOut:
-            LDA = lda(solver="svd", shrinkage=None, priors=None,
-            n_components=min(self.train_data.X.shape[1], len(self.classes)-1), store_covariance=False, tol=1e-4)
-            kf = KFold(n_splits=self.train_data.Y.size, shuffle=True, random_state=42)
-            precmatrix = []
-            for i in range(self.train_data.Y.size):
-                precmatrix.append(numpy.zeros(shape=(len(self.train_data.domain.class_var.values),len(self.train_data.domain.class_var.values))))
-            zaehler = 0
-            pb = gui.ProgressBar(self, self.NFolds[self.n_folds])
-
-            for train_index, test_index in kf.split(self.train_data):
-
-                train, test = self.train_data[train_index], self.train_data[test_index]
-                LDA.fit(train.X, train.Y)
-                Y_test_pred = LDA.predict(test.X)
-                if zaehler == 0:
-                    precmatrix[zaehler] = confusion_matrix(test, Y_test_pred)
-                else:
-                    precmatrix[zaehler] = precmatrix[zaehler-1] + confusion_matrix(test, Y_test_pred)
-                zaehler = zaehler +1
-                pb.advance()
-
-            pb.finish()
-
-            cmatrix = precmatrix[len(precmatrix)-1]
-            colsum = cmatrix.sum(axis=0)
-            rowsum = cmatrix.sum(axis=1)
-            n = len(cmatrix)
-            diag = np.diag_indices(n)
-
-            colors = cmatrix.astype(np.double)
-            colors[diag] = 0
-            if self.selected_quantity == 0:
-                normalized = cmatrix.astype(np.int)
-                formatstr = "{}"
-                div = np.array([colors.max()])
-            else:
-                if self.selected_quantity == 1:
-                    normalized = 100 * cmatrix / colsum
-                    div = colors.max(axis=0)
-                else:
-                    normalized = 100 * cmatrix / rowsum[:, np.newaxis]
-                    div = colors.max(axis=1)[:, np.newaxis]
-                formatstr = "{:2.1f} %"
-            div[div == 0] = 1
-            colors /= div
-            maxval = normalized[diag].max()
-            if maxval > 0:
-                colors[diag] = normalized[diag] / maxval
-
-            for i in range(n):
-                for j in range(n):
-                    val = normalized[i, j]
-                    col_val = colors[i, j]
-                    item = self._item(i + 2, j + 2)
-                    item.setData(
-                        "NA" if _isinvalid(val) else formatstr.format(val),
-                        Qt.DisplayRole)
-                    bkcolor = QColor.fromHsl(
-                        [0, 240][i == j], 160,
-                        255 if _isinvalid(col_val) else int(255 - 30 * col_val))
-                    item.setData(QBrush(bkcolor), Qt.BackgroundRole)
-                    item.setData("trbl", BorderRole)
-                    item.setToolTip("actual: {}\npredicted: {}".format(
-                        self.train_headers[i], self.train_headers[j]))
-                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                    self._set_item(i + 2, j + 2, item)
-
-            bold_font = self.tablemodel.invisibleRootItem().font()
-            bold_font.setBold(True)
-
-            def _sum_item(value, border=""):
-                item = QStandardItem()
-                item.setData(value, Qt.DisplayRole)
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                item.setFlags(Qt.ItemIsEnabled)
-                item.setFont(bold_font)
-                item.setData(border, BorderRole)
-                item.setData(QColor(192, 192, 192), BorderColorRole)
-                return item
-
-            for i in range(n):
-                self._set_item(n + 2, i + 2, _sum_item(int(colsum[i]), "t"))
-                self._set_item(i + 2, n + 2, _sum_item(int(rowsum[i]), "l"))
-            self._set_item(n + 2, n + 2, _sum_item(int(rowsum.sum())))
-            pass
-        else:
-            return
-
-    def kfold_changed(self):
-        self.resampling = OWLDA.KFold
-        self._param_changed()
-
-    def skfold_changed(self):
-        self.resampling = OWLDA.StratifiedKFold
-        self._param_changed()
-
     def _set_selection(self):
 
         selection = QItemSelection()
@@ -774,120 +958,6 @@ class OWLDA(widget.OWWidget):
             selection.select(sel, sel)
         self.tableview.selectionModel().select(
             selection, QItemSelectionModel.ClearAndSelect)
-
-    def _set_item(self, i, j, item):
-        self.tablemodel.setItem(i, j, item)
-
-    def _item(self, i, j):
-        return self.tablemodel.item(i, j) or QStandardItem()
-
-    def _init_table(self, nclasses):
-        item = self._item(0, 2)
-        item.setData("Predicted", Qt.DisplayRole)
-        item.setTextAlignment(Qt.AlignCenter)
-        item.setFlags(Qt.NoItemFlags)
-
-        self._set_item(0, 2, item)
-        item = self._item(2, 0)
-        item.setData("Actual", Qt.DisplayRole)
-        item.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
-        item.setFlags(Qt.NoItemFlags)
-        self.tableview.setItemDelegateForColumn(0, gui.VerticalItemDelegate())
-        self._set_item(2, 0, item)
-        self.tableview.setSpan(0, 2, 1, nclasses)
-        self.tableview.setSpan(2, 0, nclasses, 1)
-
-        font = self.tablemodel.invisibleRootItem().font()
-        bold_font = QFont(font)
-        bold_font.setBold(True)
-
-        for i in (0, 1):
-            for j in (0, 1):
-                item = self._item(i, j)
-                item.setFlags(Qt.NoItemFlags)
-                self._set_item(i, j, item)
-
-        for p, label in enumerate(self.train_headers):
-            for i, j in ((1, p + 2), (p + 2, 1)):
-                item = self._item(i, j)
-                item.setData(label, Qt.DisplayRole)
-                item.setFont(bold_font)
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                item.setFlags(Qt.ItemIsEnabled)
-                if p < len(self.train_headers) - 1:
-                    item.setData("br"[j == 1], BorderRole)
-                    item.setData(QColor(192, 192, 192), BorderColorRole)
-                self._set_item(i, j, item)
-
-        hor_header = self.tableview.horizontalHeader()
-        if len(' '.join(self.train_headers)) < 120:
-            hor_header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        else:
-            hor_header.setDefaultSectionSize(110)
-        self.tablemodel.setRowCount(nclasses + 3)
-        self.tablemodel.setColumnCount(nclasses + 3)
-
-    def _init_projector(self):
-
-        self._lda_projector = LDA(solver="svd", shrinkage=None, priors=None,
-                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
-                 preprocessors=None)
-
-        self._ldaTest_projector = LDAtestTransform(solver="svd", shrinkage=None, priors=None,
-                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
-                 preprocessors=None)
-
-    def set_attr_from_combo(self):
-        self.attr_changed()
-        self.xy_changed_manually.emit(self.attr_x, self.attr_y)
-
-    def _param_changed(self):
-
-        self._update_ConfMat()
-
-    def attr_changed(self):
-        self._setup_plot(self.attr_x, self.attr_y)
-        self.commit()
-
-    def _update_class_box(self):
-        self.plot.clear_plot()
-        self._setup_plot(self.attr_x, self.attr_y)
-
-    def _update_legend_box(self):
-        self.plot.clear_plot()
-        self._setup_plot(self.attr_x, self.attr_y)
-
-    def _prepare_data(self):
-
-        indices = self.tableview.selectedIndexes()
-        indices = {(ind.row() - 2, ind.column() - 2) for ind in indices}
-        actual = self.train_data.Y
-        predicted = self.train_pred
-        selected = [i for i, t in enumerate(zip(actual, predicted))
-                    if t in indices]
-
-        extra = []
-        class_var = self.train_data.domain.class_var
-        metas = self.train_data.domain.metas
-        attrs = self.train_data.domain.attributes
-        names = [var.name for var in chain(metas, [class_var], attrs)]
-        domain = Orange.data.Domain(self.train_data.domain.attributes,
-                                    self.train_data.domain.class_vars,
-                                    metas)
-        data = self.train_data.transform(domain)
-        if extra:
-            data.metas[:, len(self.train_data.domain.metas):] = \
-                np.hstack(tuple(extra))
-        data.name = learner_name
-
-        if selected:
-            annotated_data = create_annotated_table(data, selected)
-            data = data[selected]
-        else:
-            annotated_data = create_annotated_table(data, [])
-            data = None
-
-        return data, annotated_data
 
     def _fit(self, data=None, testset=None):
 
@@ -926,79 +996,11 @@ class OWLDA(widget.OWWidget):
         self._ldaCV = ldaCV
         self._transformedCV = self._ldaCV._transformedData
 
-    def commit(self):
-
-        self.send_features()
-        """Output data instances corresponding to selected cells"""
-        if self.train_pred is not None and self.train_data is not None:
-            data, annotated_data = self._prepare_data()
-        else:
-            data = None
-            annotated_data = None
-
-        summary = len(data) if data else self.info.NoOutput
-        details = format_summary_details(data) if data else ""
-        self.info.set_output_summary(summary, details)
-
-        #self.Outputs.selected_data.send(data)
-        #self.Outputs.annotated_data.send(annotated_data)
-
-    def send_features(self):
-        features = [attr for attr in [self.attr_x, self.attr_y] if attr]
-        #self.Outputs.features.send(features or None)
-
-    def _setup_plot(self, x_axis, y_axis):
-
-        self.plot.clear_plot()
-        if self._lda is None:
-            self.plot.clear_plot()
-            return
-
-
-        x=self._transformed.X[:,self.domainIndexes[str(self.attr_x)]]
-        y=self._transformed.X[:,self.domainIndexes[str(self.attr_y)]]
-
-        if self.class_box:
-
-            self.PlotStyle = [
-                dict(pen=None, symbolBrush=self.SYMBOLBRUSH[i], symbolPen=self.SYMBOLPEN[i], symbol='o', symbolSize=10,
-                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
-
-            self.plot.update(x,y, Style=self.PlotStyle, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box)
-        else:
-
-            self.Style = [
-                dict(pen=None, symbolBrush=self.SYMBOLBRUSH[0], symbolPen=self.SYMBOLPEN[0], symbol='o', symbolSize=10,
-                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
-            self.plot.update(x, y, Style=self.Style, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box)
-
     def clear_outputs(self):
         #self.Outputs.features.send(None)
         self.Outputs.lda.send(None)
         #self.Outputs.selected_data.send(None)
         #self.Outputs.annotated_data.send(None)
-
-    def init_attr_values(self):
-
-        datatrans = self._transformed
-        domain = numpy.array(['DF{}'.format(i + 1)
-                              for i in range(datatrans.shape[1])],
-                            dtype=object)
-
-        for i in range(len(domain)):
-            self.domainIndexes[domain[i]] = i
-
-        proposed = [a for a in domain]
-
-        dom = Domain(
-            [ContinuousVariable(name, compute_value=lambda _: None)
-             for name in proposed],
-            metas=None)
-        self._transformed = Table(dom, datatrans, metas=None)
-        self.xy_model.set_domain(dom)
-        self.attr_x = self.xy_model[0] if self.xy_model else None
-        self.attr_y = self.xy_model[1] if len(self.xy_model) >= 2 \
-            else self.attr_x
 
     def clear(self):
 
@@ -1010,14 +1012,34 @@ class OWLDA(widget.OWWidget):
 
         self._ldaCV = None
 
-    def send_report(self):
+    def _init_projector(self):
 
-        """Send report"""
-        if self.train_data is None:
-            return
-        if self.train_pred is not None:
-            self.report_table("Confusion matrix", self.tableview)
-            self.report_plot("Score plot", self.plot)
+        self._lda_projector = LDA(solver="svd", shrinkage=None, priors=None,
+                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
+                 preprocessors=None)
+
+        self._ldaTest_projector = LDAtestTransform(solver="svd", shrinkage=None, priors=None,
+                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
+                 preprocessors=None)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":  # pragma: no cover
