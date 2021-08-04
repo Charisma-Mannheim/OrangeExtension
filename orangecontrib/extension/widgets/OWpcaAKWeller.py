@@ -295,7 +295,7 @@ class OWPCA(widget.OWWidget):
     class_box = Setting(True)
     legend_box = Setting(False)
     testdata_box = Setting(False)
-
+    testdata_classes_box = Setting(False)
     selection = ContextSetting(set())
     score_x = ContextSetting(None)
     score_y = ContextSetting(None)
@@ -355,6 +355,7 @@ class OWPCA(widget.OWWidget):
         self.graph_variables = []
         self.__spin_selection = []
         self.loadings = None
+        self.testlabel = None
 
         self.SYMBOLBRUSH = [(0, 204, 204, 180), (51, 255, 51, 180), (255, 51, 51, 180), (0, 128, 0, 180),  \
                        (195, 46, 212, 180), (250, 194, 5, 180), (55, 55, 55, 180), (0, 114, 189, 180), (217, 83, 25, 180), (237, 177, 32, 180), \
@@ -418,6 +419,10 @@ class OWPCA(widget.OWWidget):
         self.testdatab = gui.checkBox(class_box,
             self, value="testdata_box", label="Show test data",
             callback=self._update_testdata_box, tooltip=None)
+
+        self.testdatabc = gui.checkBox(class_box,
+            self, value="testdata_classes_box", label="Hide test data classes",
+            callback=self._update_testdata_classes_box, tooltip=None)
 
         gui.comboBox(
             class_box, self, "confidence", label="Shown level of confidence: ",
@@ -1023,13 +1028,29 @@ class OWPCA(widget.OWWidget):
 
         normalizer = Normalize()
         centerer = Center()
+        #if self.testdata_box:
+            #testlabelqt = self._testdata_transformed.Y + np.max(self.data.Y)+1
+            #self.datalabelqt = np.hstack((self.data.Y, testlabelqt))
+            #data = np.vstack((self.data.X, self.testdata.X))
+        #else:
+         #   self.datalabelqt = self.data.Y
+          #  data = self.data.X
+
+
         if self.testdata_box:
-            testlabelqt = self._testdata_transformed.Y + np.max(self.data.Y)+1
+            if self.testdata_classes_box == True:
+                testlabelqt = np.full(self.testdata.Y.shape, np.max(self.data.Y) + 1, dtype=int)
+            else:
+                testlabelqt = self._testdata_transformed.Y + np.max(self.data.Y)+1
             self.datalabelqt = np.hstack((self.data.Y, testlabelqt))
             data = np.vstack((self.data.X, self.testdata.X))
         else:
             self.datalabelqt = self.data.Y
             data = self.data.X
+
+
+
+
         if self.standardize == True and self.centering == False:
             X_preprocessed = normalizer.fit_transform(data)
             XArray = np.copy(X_preprocessed)
@@ -1102,8 +1123,14 @@ class OWPCA(widget.OWWidget):
         classes = self.train_classes.copy()
         if self.testdata is not None:
             if self.testdata_box is True:
-                for kk in range(0,len(np.unique(self._testdata_transformed.Y))):
-                    classes[len(self.train_classes)+kk] = f'predicted {self.train_classes[kk]}'
+                if self.testdata_classes_box ==True:
+                    for kk in range(0,len(np.unique(self.testlabel))):
+                        classes[len(self.train_classes)+kk] = 'Transformed testdata'
+
+                    pass
+                else:
+                    for kk in range(0,len(np.unique(self._testdata_transformed.Y))):
+                        classes[len(self.train_classes)+kk] = f'predicted {self.train_classes[kk]}'
 
         # set the confidence level
         conf = self.Clvl[self.confidence]/100
@@ -1309,8 +1336,15 @@ class OWPCA(widget.OWWidget):
         classes = self.train_classes.copy()
         if self.testdata is not None:
             if self.testdata_box is True:
-                for kk in range(0,len(np.unique(self._testdata_transformed.Y))):
-                    classes[len(self.train_classes)+kk] = f'predicted {self.train_classes[kk]}'
+                if self.testdata_classes_box ==True:
+                    for kk in range(0,len(np.unique(self.testlabel))):
+                        classes[len(self.train_classes)+kk] = 'Transformed testdata'
+
+                    pass
+                else:
+                    for kk in range(0,len(np.unique(self._testdata_transformed.Y))):
+                        classes[len(self.train_classes)+kk] = f'predicted {self.train_classes[kk]}'
+
 
         if self.class_box:
 
@@ -1328,7 +1362,10 @@ class OWPCA(widget.OWWidget):
 
     def init_score_values(self):
         if self.testdata_box:
-            testlabel = self._testdata_transformed.Y + np.max(self.data.Y) + 1
+            if self.testdata_classes_box == True:
+                testlabel = np.full(self.testdata.Y.shape, np.max(self.data.Y) + 1, dtype=int)
+            else:
+                testlabel = self._testdata_transformed.Y + np.max(self.data.Y) + 1
             self.datalabel = np.hstack((self.data.Y, testlabel))
             datatrans = np.vstack((self._transformed.X, self._testdata_transformed.X))
         else:
@@ -1394,7 +1431,23 @@ class OWPCA(widget.OWWidget):
     def _update_testdata_box(self):
         if self.testdata is None:
             self.testdata_box = False
+            self.testdata_classes_box = False
         else:
+            if self.testdata_box == False:
+                self.testdata_classes_box = False
+            self.init_attr_values()
+            self._setup_plotThree(self.attr_x, self.attr_y)
+            self.init_score_values()
+            self._setup_score_plot(self.score_x, self.score_y)
+            self.commit()
+
+    def _update_testdata_classes_box(self):
+        if self.testdata is None:
+            self.testdata_box = False
+            self.testdata_classes_box = False
+        else:
+            if self.testdata_classes_box == True:
+                self.testdata_box = True
             self.init_attr_values()
             self._setup_plotThree(self.attr_x, self.attr_y)
             self.init_score_values()

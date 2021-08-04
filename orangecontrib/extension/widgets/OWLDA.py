@@ -81,9 +81,6 @@ class OWLDA(widget.OWWidget):
     class Outputs:
 
         lda = Output("LDA", LDA, dynamic=False)
-        #features = Output("Features", AttributeList, dynamic=False)
-        #selected_data = Output("Selected data", Orange.data.Table, default=True)
-        #annotated_data = Output(ANNOTATED_DATA_SIGNAL_NAME, Orange.data.Table)
 
     class Error(widget.OWWidget.Error):
         sparse_train_Matrix = Msg("Train data contains NaN")
@@ -103,8 +100,8 @@ class OWLDA(widget.OWWidget):
     auto_commit = Setting(True)
     class_box = Setting(True)
     legend_box = Setting(False)
-
-
+    testdata_box = Setting(False)
+    testdata_classes_box = Setting(False)
     selection = ContextSetting(set())
     attr_x = ContextSetting(None)
     attr_y = ContextSetting(None)
@@ -143,18 +140,19 @@ class OWLDA(widget.OWWidget):
         self.classes = None
 
         self.domainIndexes = {}
+        self.datalabel = None
         self.train_datalabel = None
         self.test_datalabel = None
         self.PlotStyle = None
-
+        self.testlabel = None
         self.train_class_values = None
         self.test_class_values = None
 
-        self.SYMBOLBRUSH = [(0, 204, 204, 180), (51, 255, 51, 180), (255, 51, 51, 180), (0, 128, 0, 180), (19, 234, 201, 180), \
+        self.SYMBOLBRUSH = [(0, 204, 204, 180), (51, 255, 51, 180), (255, 51, 51, 180), (0, 128, 0, 180),  \
                        (195, 46, 212, 180), (250, 194, 5, 180), (55, 55, 55, 180), (0, 114, 189, 180), (217, 83, 25, 180), (237, 177, 32, 180), \
                        (126, 47, 142, 180), (119, 172, 180)]
 
-        self.SYMBOLPEN = [(0, 204, 204, 255), (51, 255, 51, 255), (255, 51, 51, 255), (0, 128, 0, 255), (19, 234, 201, 255), \
+        self.SYMBOLPEN = [(0, 204, 204, 255), (51, 255, 51, 255), (255, 51, 51, 255), (0, 128, 0, 255),  \
                        (195, 46, 212, 255), (250, 194, 5, 255), (55, 55, 55, 255), (0, 114, 189, 255), (217, 83, 25, 255), (237, 177, 32, 255), \
                        (126, 47, 142, 255), (119, 172, 255)]
 
@@ -192,6 +190,13 @@ class OWLDA(widget.OWWidget):
             self, value="legend_box", label="Show legend",
             callback=self._update_legend_box, tooltip=None)
 
+        self.testdatab = gui.checkBox(class_box,
+            self, value="testdata_box", label="Show test data",
+            callback=self._update_testdata_box, tooltip=None)
+
+        self.testdatabc = gui.checkBox(class_box,
+            self, value="testdata_classes_box", label="Hide test data classes",
+            callback=self._update_testdata_classes_box, tooltip=None)
 
         box = gui.vBox(self.controlArea, "Confusion matrix options")
         form = QFormLayout()
@@ -257,6 +262,31 @@ class OWLDA(widget.OWWidget):
 
 
     #Scatter plot
+    def _update_testdata_box(self):
+        if self.test_data is None:
+            self.testdata_box = False
+        else:
+            if self.testdata_box == False:
+                self.testdata_classes_box = False
+            self.test_datalabel = self.test_data.Y
+            self.init_attr_values()
+            self._setup_plot(self.attr_x, self.attr_y)
+
+    def _update_testdata_classes_box(self):
+        if self.test_data is None:
+            self.testdata_box = False
+            self.testdata_classes_box = False
+        else:
+            if self.testdata_classes_box == True:
+                self.testdata_box = True
+                self.test_datalabel = np.zeros(self.test_data.Y.shape, dtype=int)
+                self.init_attr_values()
+                self._setup_plot(self.attr_x, self.attr_y)
+            else:
+                self.test_datalabel = self.test_data.Y
+                self.init_attr_values()
+                self._setup_plot(self.attr_x, self.attr_y)
+
     def set_attr_from_combo(self):
         self.attr_changed()
         self.xy_changed_manually.emit(self.attr_x, self.attr_y)
@@ -281,29 +311,48 @@ class OWLDA(widget.OWWidget):
             return
 
 
-        x=self._transformed.X[:,self.domainIndexes[str(self.attr_x)]]
-        y=self._transformed.X[:,self.domainIndexes[str(self.attr_y)]]
+        x=self._Transformed.X[:,self.domainIndexes[str(self.attr_x)]]
+        y=self._Transformed.X[:,self.domainIndexes[str(self.attr_y)]]
+
+        classes = self.train_classes.copy()
+        if self.test_data is not None:
+            if self.testdata_box is True:
+                if self.testdata_classes_box ==True:
+                    for kk in range(0,len(np.unique(self.testlabel))):
+                        classes[len(self.train_classes)+kk] = 'Transformed testdata'
+
+                    pass
+                else:
+                    for kk in range(0,len(np.unique(self._testdata_transformed.Y))):
+                        classes[len(self.train_classes)+kk] = f'predicted {self.train_classes[kk]}'
 
         if self.class_box:
 
             self.PlotStyle = [
                 dict(pen=None, symbolBrush=self.SYMBOLBRUSH[i], symbolPen=self.SYMBOLPEN[i], symbol='o', symbolSize=10,
-                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
+                    name=classes[i]) for i in range(len(classes))]
 
-            self.plot.update(x,y, Style=self.PlotStyle, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box)
+            self.plot.update(x,y, Style=self.PlotStyle, labels=self.datalabel, x_axis_label=x_axis, y_axis_label=y_axis, legend=self.legend_box)
         else:
 
             self.Style = [
                 dict(pen=None, symbolBrush=self.SYMBOLBRUSH[0], symbolPen=self.SYMBOLPEN[0], symbol='o', symbolSize=10,
-                    name=self.train_classes[i]) for i in range(len(self.train_classes))]
-            self.plot.update(x, y, Style=self.Style, labels=self.train_datalabel, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box)
+                    name=classes[i]) for i in range(len(classes))]
+            self.plot.update(x, y, Style=self.Style, labels=self.datalabel, x_axis_label=x_axis, y_axis_label=y_axis,legend=self.legend_box)
 
     def init_attr_values(self):
 
-        datatrans = self._transformed
+        if self.testdata_box:
+            testlabel = self.testlabel = self.test_datalabel + np.max(self.train_datalabel) + 1
+            self.datalabel = np.hstack((self.train_datalabel, testlabel))
+            datatrans = np.vstack((self._transformed, self._testdata_transformed.X))
+        else:
+            self.datalabel = self.train_datalabel
+            datatrans = self._transformed
         domain = numpy.array(['DF{}'.format(i + 1)
                               for i in range(datatrans.shape[1])],
                             dtype=object)
+
 
         for i in range(len(domain)):
             self.domainIndexes[domain[i]] = i
@@ -314,7 +363,7 @@ class OWLDA(widget.OWWidget):
             [ContinuousVariable(name, compute_value=lambda _: None)
              for name in proposed],
             metas=None)
-        self._transformed = Table(dom, datatrans, metas=None)
+        self._Transformed = Table(dom, datatrans, metas=None)
         self.xy_model.set_domain(dom)
         self.attr_x = self.xy_model[0] if self.xy_model else None
         self.attr_y = self.xy_model[1] if len(self.xy_model) >= 2 \
@@ -824,24 +873,8 @@ class OWLDA(widget.OWWidget):
 
     def commit(self):
 
-        self.send_features()
         """Output data instances corresponding to selected cells"""
-        if self.train_pred is not None and self.train_data is not None:
-            data, annotated_data = self._prepare_data()
-        else:
-            data = None
-            annotated_data = None
-
-        summary = len(data) if data else self.info.NoOutput
-        details = format_summary_details(data) if data else ""
-        self.info.set_output_summary(summary, details)
-
-        #self.Outputs.selected_data.send(data)
-        #self.Outputs.annotated_data.send(annotated_data)
-
-    def send_features(self):
-        features = [attr for attr in [self.attr_x, self.attr_y] if attr]
-        #self.Outputs.features.send(features or None)
+        self.Outputs.lda.send(self._lda_projector)
 
     def send_report(self):
 
@@ -849,13 +882,12 @@ class OWLDA(widget.OWWidget):
         if self.train_data is None:
             return
         if self.train_pred is not None:
-            self.report_table("Confusion matrix", self.tableview)
             self.report_plot("Score plot", self.plot)
+            self.report_table("Confusion matrix", self.tableview)
+
 #Data handling
     @Inputs.train_data
     def set_train_data(self, data):
-        #if data is None:
-            #time.sleep(3)
         self.clear()
         self.train_data = None
         if (data == None):
@@ -897,8 +929,6 @@ class OWLDA(widget.OWWidget):
 
     @Inputs.test_data
     def set_test_data(self, data):
-        #if self._lda is None:
-            #time.sleep(3)
         if data == None:
             return
         self.test_data = None
@@ -922,6 +952,8 @@ class OWLDA(widget.OWWidget):
 
         self.test_data = data
         self.test_datalabel = self.test_data.Y
+
+
         b = numpy.unique(self.test_data.Y)
         if self.test_data.domain.class_var:
             self.test_classes = {int(b[i]) : self.test_data.domain.class_var.values[i] for i in numpy.arange(0,len(self.test_data.domain.class_var.values))}
@@ -929,9 +961,12 @@ class OWLDA(widget.OWWidget):
         if data is not None:
             if np.any(np.isnan(self.test_data.X)):
                 self.Error.sparse_test_Matrix()
+            elif self._lda is None:
+                time.sleep(3)
             elif self._lda is not None:
                 self.test_pred = self._lda.proj.predict(self.test_data.X)
                 self.test_class_values = data.domain.class_var.values
+                self._testdata_transformed = self.testdata_transform(self.test_data, self._lda)
         if self.test_pred is not None:
             nan_values = False
             if np.any(np.isnan(self.train_data.Y)) or \
@@ -944,20 +979,11 @@ class OWLDA(widget.OWWidget):
                        (unicodedata.lookup("N-ARY SUMMATION"), )
 
             self.Error.invalid_values(shown=nan_values)
-
+            if self.testdata_box:
+                self.init_attr_values()
+                self._setup_plot(self.attr_x, self.attr_y)
             self._update_ConfMat()
-            self._set_selection()
             self.unconditional_commit()
-
-    def _set_selection(self):
-
-        selection = QItemSelection()
-        index = self.tableview.model().index
-        for row, col in self.selection:
-            sel = index(row + 2, col + 2)
-            selection.select(sel, sel)
-        self.tableview.selectionModel().select(
-            selection, QItemSelectionModel.ClearAndSelect)
 
     def _fit(self, data=None, testset=None):
 
@@ -984,6 +1010,37 @@ class OWLDA(widget.OWWidget):
 
         return lda, lda._transformedData, pred, class_values
 
+    def testdata_transform(self, data, projector):
+
+        X = data
+        Projector = projector
+        transformed = Projector(X)
+        return transformed
+
+    def clear_outputs(self):
+
+        self.Outputs.lda.send(None)
+
+    def clear(self):
+
+        self.tablemodel.clear()
+        self.train_headers = []
+        self._lda = None
+        self.plot.clear_plot()
+        self._transformed = None
+        self.train_pred = None
+        self.train_class_values = None
+
+    def _init_projector(self):
+
+        self._lda_projector = LDA(solver="svd", shrinkage=None, priors=None,
+                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
+                 preprocessors=None)
+
+        self._ldaTest_projector = LDAtestTransform(solver="svd", shrinkage=None, priors=None,
+                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
+                 preprocessors=None)
+
     def _fitCV(self, data=None, testdata = None):
 
         self.clearCV()
@@ -996,33 +1053,9 @@ class OWLDA(widget.OWWidget):
         self._ldaCV = ldaCV
         self._transformedCV = self._ldaCV._transformedData
 
-    def clear_outputs(self):
-        #self.Outputs.features.send(None)
-        self.Outputs.lda.send(None)
-        #self.Outputs.selected_data.send(None)
-        #self.Outputs.annotated_data.send(None)
-
-    def clear(self):
-
-        self.tablemodel.clear()
-        self.train_headers = []
-        self._lda = None
-
     def clearCV(self):
 
         self._ldaCV = None
-
-    def _init_projector(self):
-
-        self._lda_projector = LDA(solver="svd", shrinkage=None, priors=None,
-                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
-                 preprocessors=None)
-
-        self._ldaTest_projector = LDAtestTransform(solver="svd", shrinkage=None, priors=None,
-                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
-                 preprocessors=None)
-
-
 
 
 
@@ -1044,11 +1077,11 @@ class OWLDA(widget.OWWidget):
 
 if __name__ == "__main__":  # pragma: no cover
 
-    X_train = Table("iris")
+    X = Table("iris")
     KF = KFold(n_splits=3, shuffle=True, random_state=42)
-    KF.get_n_splits(X_train)
+    KF.get_n_splits(X)
 
-    train_index, test_index, bla = KF.split(X_train)
-    X_train, X_test = X_train[test_index[0]], X_train[test_index[1]]
+    train_index, test_index, bla = KF.split(X)
+    X_train, X_test = X[test_index[0]], X[test_index[1]]
 
     WidgetPreview(OWLDA).run(set_train_data=X_train, set_test_data=X_test)
