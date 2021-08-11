@@ -132,7 +132,7 @@ class OWLDA(widget.OWWidget):
         self.train_headers = []
         self.test_headers = []
         self._lda = None
-        self._ldaCV = None
+        #self._ldaCV = None
         self._transformed = None
         self._transformedCV = None
         self.train_pred = None
@@ -1036,42 +1036,6 @@ class OWLDA(widget.OWWidget):
         self._lda_projector = LDA(solver="svd", shrinkage=None, priors=None,
                  n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
                  preprocessors=None)
-
-        self._ldaTest_projector = LDAtestTransform(solver="svd", shrinkage=None, priors=None,
-                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
-                 preprocessors=None)
-
-    def _fitCV(self, data=None, testdata = None):
-
-        self.clearCV()
-        if data is None:
-
-            return
-
-        ldaCV = self._ldaTest_projector(data, testdata)
-
-        self._ldaCV = ldaCV
-        self._transformedCV = self._ldaCV._transformedData
-
-    def clearCV(self):
-
-        self._ldaCV = None
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

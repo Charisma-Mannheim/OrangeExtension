@@ -142,7 +142,7 @@ class OWPCALDA(widget.OWWidget):
         self.test_headers = []
         self._CVE = None
         self._lda = None
-        self._ldaCV = None
+        #self._ldaCV = None
         self._transformed = None
         self._transformedCV = None
         self.train_pred = None
@@ -298,7 +298,7 @@ class OWPCALDA(widget.OWWidget):
         boxCVE.layout().addLayout(formCVE)
 
         self.plotTwo = SliderGraph(
-            "Principal Components", "Cross Validation Error",
+            "Components", "Cross Validation Error",
             callback=self._on_cut_changed)
         boxCVE.layout().addWidget(self.plotTwo)
         tab = createTabPage(tabs, "CVE-plot")
@@ -514,24 +514,6 @@ class OWPCALDA(widget.OWWidget):
                  n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
                  preprocessors=None)
 
-        self._ldaTest_projector = LDAtestTransform(solver="svd", shrinkage=None, priors=None,
-                 n_components=MAX_COMPONENTS, store_covariance=False, tol=1e-4,
-                 preprocessors=None)
-
-    def _fitCV(self, data=None, testdata = None):
-
-        self.clearCV()
-        if data is None:
-            return
-
-        ldaCV = self._lda_projector(data)
-
-        self._ldaCV = ldaCV
-
-    def clearCV(self):
-
-        self._ldaCV = None
-
 #Scatter plot
     def _update_testdata_box(self):
         if self.test_data is None:
@@ -657,7 +639,7 @@ class OWPCALDA(widget.OWWidget):
                 colors = cmatrix.astype(np.double)
                 colors[diag] = 0
                 if self.selected_quantity == 0:
-                    normalized = cmatrix.astype(np.int)
+                    normalized = cmatrix.astype(int)
                     formatstr = "{}"
                     div = np.array([colors.max()])
                 else:
@@ -723,7 +705,7 @@ class OWPCALDA(widget.OWWidget):
                 colors = cmatrix.astype(np.double)
                 colors[diag] = 0
                 if self.selected_quantity == 0:
-                    normalized = cmatrix.astype(np.int)
+                    normalized = cmatrix.astype(int)
                     formatstr = "{}"
                     div = np.array([colors.max()])
                 else:
@@ -810,7 +792,7 @@ class OWPCALDA(widget.OWWidget):
             colors = cmatrix.astype(np.double)
             colors[diag] = 0
             if self.selected_quantity == 0:
-                normalized = cmatrix.astype(np.int)
+                normalized = cmatrix.astype(int)
                 formatstr = "{}"
                 div = np.array([colors.max()])
             else:
@@ -894,7 +876,7 @@ class OWPCALDA(widget.OWWidget):
             colors = cmatrix.astype(np.double)
             colors[diag] = 0
             if self.selected_quantity == 0:
-                normalized = cmatrix.astype(np.int)
+                normalized = cmatrix.astype(int)
                 formatstr = "{}"
                 div = np.array([colors.max()])
             else:
@@ -978,7 +960,7 @@ class OWPCALDA(widget.OWWidget):
             colors = cmatrix.astype(np.double)
             colors[diag] = 0
             if self.selected_quantity == 0:
-                normalized = cmatrix.astype(np.int)
+                normalized = cmatrix.astype(int)
                 formatstr = "{}"
                 div = np.array([colors.max()])
             else:
@@ -1161,163 +1143,162 @@ class OWPCALDA(widget.OWWidget):
         data = self.train_data[:]
 
         if self.resampling == self.TestOnTrain:
+            if self.train_data is not None:
+                training_data = self.train_data[:]
 
-            training_data = self.train_data[:]
-
-            def innerfunc(index):
-                training_data.X = data.X[:, 0:index]
-                LDA = lda(solver="svd", shrinkage=None, priors=None,
-                 n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
-                LDA.fit(training_data.X, training_data.Y)
-                train_pred = LDA.predict(training_data.X)
-
-                if train_pred is not None:
-                    cmatrix = confusion_matrix(training_data, train_pred)
-                    summation = cmatrix.sum()
-                    #cve = (summation - numpy.trace(cmatrix))/summation
-                    cve = summation - numpy.trace(cmatrix)
-                    return cve
+                def innerfunc(index):
 
 
-            CVElist = [innerfunc(index=i) for i in range(1,data.X.shape[1]+1)]
-            CVE = numpy.array(CVElist)
-            self._CVE = CVE
+                    training_data.X = data.X[:, :index+1]
 
+                    LDA = lda(solver="svd", shrinkage=None, priors=None,
+                    n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
+                    LDA.fit(training_data.X, training_data.Y)
+                    train_pred = LDA.predict(training_data.X)
+
+                    if train_pred is not None:
+                        cmatrix = confusion_matrix(training_data, train_pred)
+                        summation = cmatrix.sum()
+                        cve = (summation - numpy.trace(cmatrix))/summation
+                        return cve
+
+
+                CVElist = [innerfunc(index=i) for i in range(0, data.X.shape[1])]
+                CVE = numpy.array(CVElist)
+                self._CVE = CVE
         elif self.resampling == self.TestOnTest:
 
             training_data = self.train_data[:]
+            if self.test_data is not None:
+                test_data = self.test_data[:]
+                testing_data = self.test_data[:]
+                def innerfunc(index):
+                    training_data.X = data.X[:, :index+1]
+                    testing_data.X = test_data.X[:, :index+1]
+                    LDA = lda(solver="svd", shrinkage=None, priors=None,
+                    n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
+                    LDA.fit(training_data.X, training_data.Y)
+                    test_pred = LDA.predict(testing_data.X)
 
-            test_data = self.test_data[:]
-            testing_data = self.test_data[:]
-            def innerfunc(index):
-                training_data.X = data.X[:, 0:index]
-                testing_data.X = test_data.X[:, 0:index]
-                LDA = lda(solver="svd", shrinkage=None, priors=None,
-                 n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
-                LDA.fit(training_data.X, training_data.Y)
-                test_pred = LDA.predict(testing_data.X)
+                    if test_pred is not None:
+                        cmatrix = confusion_matrix(testing_data, test_pred)
+                        summation = cmatrix.sum()
+                        cve = (summation - numpy.trace(cmatrix))/summation
+                        return cve
 
-                if test_pred is not None:
-                    cmatrix = confusion_matrix(testing_data, test_pred)
-                    summation = cmatrix.sum()
-                    #cve = (summation - numpy.trace(cmatrix))/summation
-                    cve = summation - numpy.trace(cmatrix)
-                    return cve
+                CVElist = [innerfunc(index=i) for i in range(data.X.shape[1])]
 
-            CVElist = [innerfunc(index=i) for i in range(1,data.X.shape[1]+1)]
-
-            CVE = numpy.array(CVElist)
-            self._CVE = CVE
-
+                CVE = numpy.array(CVElist)
+                self._CVE = CVE
         elif self.resampling == self.LeaveOneOut:
-            pb = gui.ProgressBar(self, self.train_data.Y.size)
-            kf = KFold(n_splits=self.train_data.Y.size, shuffle=True, random_state=42)
-            CVElist = []
-            cve_list_mat = []
+            if self.train_data is not None:
+                pb = gui.ProgressBar(self, self.train_data.Y.size)
+                kf = KFold(n_splits=self.train_data.Y.size, shuffle=True, random_state=42)
+                CVElist = []
+                cve_list_mat = []
 
-            for train_index, test_index in kf.split(self.train_data):
-                train_data, test_data = self.train_data[train_index], self.train_data[test_index]
-                training_data = train_data[:]
-                testing_data = test_data[:]
-                def innerfunc(index):
-                    training_data.X = train_data.X[:, 0:index]
-                    testing_data.X = test_data.X[:, 0:index]
-                    LDA = lda(solver="svd", shrinkage=None, priors=None,
-                    n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
-                    LDA.fit(training_data.X, training_data.Y)
-                    test_pred = LDA.predict(testing_data.X)
+                for train_index, test_index in kf.split(self.train_data):
+                    train_data, test_data = self.train_data[train_index], self.train_data[test_index]
+                    training_data = train_data[:]
+                    testing_data = test_data[:]
+                    def innerfunc(index):
+                        training_data.X = train_data.X[:, :index+1]
+                        testing_data.X = test_data.X[:, :index+1]
+                        LDA = lda(solver="svd", shrinkage=None, priors=None,
+                        n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
+                        LDA.fit(training_data.X, training_data.Y)
+                        test_pred = LDA.predict(testing_data.X)
 
-                    if test_pred is not None:
-                        cmatrix = confusion_matrix(testing_data, test_pred)
-                        summation = cmatrix.sum()
-                        #cve = (summation - numpy.trace(cmatrix))/summation
-                        cve = summation - numpy.trace(cmatrix)
-                        return cve
-                CVElist = [innerfunc(index=i) for i in range(1, data.X.shape[1]+1)]
-                cve_list_mat.append(CVElist)
-                pb.advance()
+                        if test_pred is not None:
+                            cmatrix = confusion_matrix(testing_data, test_pred)
+                            summation = cmatrix.sum()
+                            #cve = (summation - numpy.trace(cmatrix))/summation
+                            cve = (summation - numpy.trace(cmatrix))/summation
+                            return cve
+                    CVElist = [innerfunc(index=i) for i in range(data.X.shape[1])]
+                    cve_list_mat.append(CVElist)
+                    pb.advance()
 
 
-            cve_mat =numpy.array(cve_list_mat)
-            cve = numpy.sum(cve_mat,0)
+                cve_mat =numpy.array(cve_list_mat)
+                cve = numpy.sum(cve_mat,0)
 
-            CVE = cve
-            self._CVE = CVE
-            pb.finish()
-
+                CVE = cve
+                self._CVE = CVE
+                pb.finish()
         elif self.resampling == self.KFold:
-            pb = gui.ProgressBar(self, self.NFolds[self.n_folds])
-            kf = KFold(n_splits=self.NFolds[self.n_folds], shuffle=True, random_state=42)
-            CVElist = []
-            cve_list_mat = []
+            if self.train_data is not None:
+                pb = gui.ProgressBar(self, self.NFolds[self.n_folds])
+                kf = KFold(n_splits=self.NFolds[self.n_folds], shuffle=True, random_state=42)
+                CVElist = []
+                cve_list_mat = []
 
-            for train_index, test_index in kf.split(self.train_data):
-                train_data, test_data = self.train_data[train_index], self.train_data[test_index]
-                training_data = train_data[:]
-                testing_data = test_data[:]
-                def innerfunc(index):
-                    training_data.X = train_data.X[:, 0:index]
-                    testing_data.X = test_data.X[:, 0:index]
-                    LDA = lda(solver="svd", shrinkage=None, priors=None,
-                    n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
-                    LDA.fit(training_data.X, training_data.Y)
-                    test_pred = LDA.predict(testing_data.X)
+                for train_index, test_index in kf.split(self.train_data):
+                    train_data, test_data = self.train_data[train_index], self.train_data[test_index]
+                    training_data = train_data[:]
+                    testing_data = test_data[:]
+                    def innerfunc(index):
+                        training_data.X = train_data.X[:, :index+1]
+                        testing_data.X = test_data.X[:, :index+1]
+                        LDA = lda(solver="svd", shrinkage=None, priors=None,
+                        n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
+                        LDA.fit(training_data.X, training_data.Y)
+                        test_pred = LDA.predict(testing_data.X)
 
-                    if test_pred is not None:
-                        cmatrix = confusion_matrix(testing_data, test_pred)
-                        summation = cmatrix.sum()
-                        #cve = (summation - numpy.trace(cmatrix))/summation
-                        cve = summation - numpy.trace(cmatrix)
-                        return cve
-                CVElist = [innerfunc(index=i) for i in range(1, data.X.shape[1]+1)]
-                cve_list_mat.append(CVElist)
-                pb.advance()
+                        if test_pred is not None:
+                            cmatrix = confusion_matrix(testing_data, test_pred)
+                            summation = cmatrix.sum()
+                            #cve = (summation - numpy.trace(cmatrix))/summation
+                            cve = (summation - numpy.trace(cmatrix))/summation
+                            return cve
+                    CVElist = [innerfunc(index=i) for i in range(data.X.shape[1])]
+                    cve_list_mat.append(CVElist)
+                    pb.advance()
 
 
-            cve_mat =numpy.array(cve_list_mat)
-            cve = numpy.sum(cve_mat,0)
+                cve_mat =numpy.array(cve_list_mat)
+                cve = numpy.sum(cve_mat,0)
 
-            CVE = cve
-            self._CVE = CVE
-            pb.finish()
-
+                CVE = cve
+                self._CVE = CVE
+                pb.finish()
         elif self.resampling == self.StratifiedKFold:
-            pb = gui.ProgressBar(self, self.NFolds[self.sn_folds])
+            if self.train_data is not None:
+                pb = gui.ProgressBar(self, self.NFolds[self.sn_folds])
 
-            kf = StratifiedKFold(n_splits=self.sNFolds[self.sn_folds], shuffle=True, random_state=42)
-            CVElist = []
-            cve_list_mat = []
+                kf = StratifiedKFold(n_splits=self.sNFolds[self.sn_folds], shuffle=True, random_state=42)
+                CVElist = []
+                cve_list_mat = []
 
-            for train_index, test_index in kf.split(self.train_data, self.train_data.Y):
-                train_data, test_data = self.train_data[train_index], self.train_data[test_index]
-                training_data = train_data[:]
-                testing_data = test_data[:]
-                def innerfunc(index):
-                    training_data.X = train_data.X[:, 0:index + 1]
-                    testing_data.X = test_data.X[:, 0:index + 1]
-                    LDA = lda(solver="svd", shrinkage=None, priors=None,
-                    n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
-                    LDA.fit(training_data.X, training_data.Y)
-                    test_pred = LDA.predict(testing_data.X)
+                for train_index, test_index in kf.split(self.train_data, self.train_data.Y):
+                    train_data, test_data = self.train_data[train_index], self.train_data[test_index]
+                    training_data = train_data[:]
+                    testing_data = test_data[:]
+                    def innerfunc(index):
+                        training_data.X = train_data.X[:, :index + 1]
+                        testing_data.X = test_data.X[:, :index + 1]
+                        LDA = lda(solver="svd", shrinkage=None, priors=None,
+                        n_components=min(min(training_data.X.shape), len(numpy.unique(training_data.Y))-1), store_covariance=False, tol=1e-4)
+                        LDA.fit(training_data.X, training_data.Y)
+                        test_pred = LDA.predict(testing_data.X)
 
-                    if test_pred is not None:
-                        cmatrix = confusion_matrix(testing_data, test_pred)
-                        summation = cmatrix.sum()
-                        #cve = (summation - numpy.trace(cmatrix))/summation
-                        cve = summation - numpy.trace(cmatrix)
-                        return cve
-                CVElist = [innerfunc(index=i) for i in range(1, data.X.shape[1]+1)]
-                cve_list_mat.append(CVElist)
-                pb.advance()
+                        if test_pred is not None:
+                            cmatrix = confusion_matrix(testing_data, test_pred)
+                            summation = cmatrix.sum()
+                            #cve = (summation - numpy.trace(cmatrix))/summation
+                            cve = (summation - numpy.trace(cmatrix))/summation
+                            return cve
+                    CVElist = [innerfunc(index=i) for i in range(data.X.shape[1])]
+                    cve_list_mat.append(CVElist)
+                    pb.advance()
 
 
-            cve_mat =numpy.array(cve_list_mat)
-            cve = numpy.sum(cve_mat,0)
+                cve_mat =numpy.array(cve_list_mat)
+                cve = numpy.sum(cve_mat,0)
 
-            CVE = cve
-            self._CVE = CVE
-            pb.finish()
-
+                CVE = cve
+                self._CVE = CVE
+                pb.finish()
         return CVE
 
     def _update_selection_component_spin(self):
@@ -1354,4 +1335,4 @@ if __name__ == "__main__":  # pragma: no cover
     train_index, test_index, bla = KF.split(X)
     X_train, X_test = X[test_index[0]], X[test_index[1]]
 
-    WidgetPreview(OWPCALDA).run(set_train_data=X_train, set_test_data=X_test)
+    WidgetPreview(OWPCALDA).run(set_train_data=X, set_test_data=X_test)

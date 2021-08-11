@@ -1028,15 +1028,6 @@ class OWPCA(widget.OWWidget):
 
         normalizer = Normalize()
         centerer = Center()
-        #if self.testdata_box:
-            #testlabelqt = self._testdata_transformed.Y + np.max(self.data.Y)+1
-            #self.datalabelqt = np.hstack((self.data.Y, testlabelqt))
-            #data = np.vstack((self.data.X, self.testdata.X))
-        #else:
-         #   self.datalabelqt = self.data.Y
-          #  data = self.data.X
-
-
         if self.testdata_box:
             if self.testdata_classes_box == True:
                 testlabelqt = np.full(self.testdata.Y.shape, np.max(self.data.Y) + 1, dtype=int)
@@ -1047,9 +1038,6 @@ class OWPCA(widget.OWWidget):
         else:
             self.datalabelqt = self.data.Y
             data = self.data.X
-
-
-
 
         if self.standardize == True and self.centering == False:
             X_preprocessed = normalizer.fit_transform(data)
@@ -1224,7 +1212,6 @@ class OWPCA(widget.OWWidget):
     def plot_spin_selection(self):
         self._remove_spin_selection()
         loadings = self.loadings[self.valid_loadings]
-        #, self.graph_variables]
         if self.Principal_Component > loadings.X.shape[0]:
             data = loadings[len(self.valid_loadings) - 1, :]
             self.Error.loading_not_available()
@@ -1271,13 +1258,7 @@ class OWPCA(widget.OWWidget):
             return
 
         ticks = [a.name for a in self.graph_variables]
-        #data = self.data[self.valid_loadings, self.graph_variables]
-        #datalist = list(data.X[self.Principal_Component-1, :])
-        #ticks2 = [str(a) for a in datalist]
         self.loadingsplot.getAxis("bottom").set_ticks(ticks)
-        #self.loadingsplot.getAxis("left")
-
-        #self.loadingsplot.getAxis("left")
         self.plot_spin_selection()
         self.loadingsplot.view_box.enableAutoRange()
         self.loadingsplot.view_box.updateAutoRange()
@@ -1371,7 +1352,9 @@ class OWPCA(widget.OWWidget):
         else:
             self.datalabel = self.data.Y
             datatrans = self._transformed.X
-        domain = np.array(['PC {}'.format(i + 1)
+        explVar = np.array(self._variance_ratio, ndmin=2)
+
+        domain = np.array([f'PC {i + 1}  {str(np.round(explVar[:,i]*100,2))}%'
                               for i in range(datatrans.shape[1])],
                             dtype=object)
 
@@ -1384,6 +1367,7 @@ class OWPCA(widget.OWWidget):
             [ContinuousVariable(name, compute_value=lambda _: None)
              for name in proposed],
             metas=None)
+
         self._Transformed = Table(dom, datatrans, metas=None)
         self.xy_modelScore.set_domain(dom)
         self.score_x = self.xy_modelScore[0] if self.xy_modelScore else None
