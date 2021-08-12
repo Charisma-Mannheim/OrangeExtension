@@ -50,7 +50,6 @@ class OWPLSRegression(OWBaseLearner):
             callback=self.settings_changed,
             checkCallback=self.settings_changed)
 
-
     def handleNewSignals(self):
         self.apply()
 
@@ -104,8 +103,6 @@ class OWPLSRegression(OWBaseLearner):
         self.Outputs.coefficients.send(coef_table)
         self.Outputs.loadings.send(loadings_table)
         self.Outputs.scores.send(scores_table)
-
-
 
 
 if __name__ == "__main__":  # pragma: no cover

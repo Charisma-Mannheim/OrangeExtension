@@ -315,6 +315,7 @@ class OWPCA(widget.OWWidget):
         not_enough_attrs = Msg("Need at least one continuous feature.")
         no_valid_loadings = Msg("No plot due to no valid data.")
         loading_not_available = Msg("Requested loadings not available.")
+        
     class Information(OWWidget.Information):
         hidden_instances = Msg("Instances with unknown values are not shown.")
         too_many_features = Msg("Data has too many features. Only first {}"
