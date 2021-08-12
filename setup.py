@@ -2,15 +2,15 @@ from os import path, walk
 import sys
 from setuptools import setup, find_packages
 
-NAME = "Charisma toolbox 1"
-VERSION = "0.0.1"
+NAME = "Charisma toolbox"
+VERSION = "0.0.2"
 DESCRIPTION = "Add-ons providing tools for chemometric data analysis"
 #LONG_DESCRIPTION = open(path.join(path.dirname(__file__), 'README.md')).read()
 #LICENSE = "BSD"
 KEYWORDS = (
     # [PyPi](https://pypi.python.org) packages with keyword "orange3 add-on"
     # can be installed using the Orange Add-on Manager
-    'orange3 add-on',
+    'orange3 add-on'
 )
 
 PACKAGES = find_packages()
@@ -29,13 +29,13 @@ ENTRY_POINTS = {
     # Entry points that marks this package as an orange add-on. If set, addon will
     # be shown in the add-ons manager even if not published on PyPi.
     'orange3.addon': (
-        'Charisma toolbox 1 = orangecontrib.extension',
+        'Charisma toolbox = orangecontrib.extension',
     ),
     # Entry point used to specify packages containing tutorials accessible
     # from welcome screen. Tutorials are saved Orange Workflows (.ows files).
     'orange.widgets.tutorials': (
         # Syntax: any_text = path.to.package.containing.tutorials
-        'Charisma toolbox 1 Tutorials = orangecontrib.extension.tutorials',
+        'Charisma toolbox Tutorials = orangecontrib.extension.tutorials',
     ),
 
     # Entry point used to specify packages containing widgets.
@@ -43,7 +43,7 @@ ENTRY_POINTS = {
         # Syntax: category name = path.to.package.containing.widgets
         # Widget category specification can be seen in
         #    orangecontrib/extension/widgets/__init__.py
-        'Charisma toolbox 1 = orangecontrib.extension.widgets',
+        'Charisma toolbox = orangecontrib.extension.widgets',
     ),
 
     # Register widget help
@@ -71,7 +71,7 @@ def include_documentation(local_dir, install_dir):
     DATA_FILES.extend(doc_files)
 
 if __name__ == '__main__':
-    include_documentation('doc/build/htmlhelp', 'help/orange3-example')
+    include_documentation('doc/_build/html', 'help/orange3-example')
     setup(
         name=NAME,
         version=VERSION,
