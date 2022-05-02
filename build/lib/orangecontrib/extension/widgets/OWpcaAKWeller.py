@@ -332,7 +332,7 @@ class OWPCA(widget.OWWidget):
         dmod = DomainModel
         self.xy_model = DomainModel(dmod.MIXED, valid_types=ContinuousVariable)
         super().__init__()
-        self.parallel = Parallel(n_jobs=-1, pre_dispatch='2*n_jobs', prefer="threads")
+        #self.parallel = Parallel(n_jobs=-1, pre_dispatch='2*n_jobs', prefer="threads")
         self.data = None
         self.testdata = None
         self._testdata_transformed = None

@@ -122,7 +122,7 @@ class OWLDA(widget.OWWidget):
 
     def __init__(self):
         super().__init__()
-        self.parallel = Parallel(n_jobs=-1, prefer="threads", pre_dispatch='2*n_jobs')
+        #self.parallel = Parallel(n_jobs=-1, prefer="threads", pre_dispatch='2*n_jobs')
         self.train_data = None
         self.test_data = None
         self.train_classes = None
